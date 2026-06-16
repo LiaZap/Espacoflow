@@ -1,0 +1,32 @@
+# dependências
+/node_modules
+/.pnp
+.pnp.js
+
+# next
+/.next/
+/out/
+next-env.d.ts
+
+# produção
+/build
+/dist
+
+# ambiente / secrets
+.env
+.env*.local
+.env.production
+
+# testes
+/coverage
+
+# logs
+*.log
+npm-debug.log*
+
+# SO / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea

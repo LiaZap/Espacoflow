@@ -1,0 +1,34 @@
+# Banco de desenvolvimento IDÊNTICO ao de produção (regra da base: nunca SQLite).
+# Sobe PostgreSQL + Redis (Redis usado pela fila FIFO de jobs — BullMQ).
+services:
+  db:
+    image: postgres:16
+    container_name: espaco_flow_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: espaco_flow_dev
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev
+    ports:
+      # Host 5432 já é usado por um PostgreSQL nativo nesta máquina → mapeia 5433.
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev -d espaco_flow_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: espaco_flow_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+
+volumes:
+  pgdata:
+  redisdata:

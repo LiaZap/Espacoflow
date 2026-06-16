@@ -1,0 +1,12 @@
+Coloque aqui as fotos das salas (a galeria "Conheça os espaços" da landing usa estes nomes).
+Formato recomendado: JPG, proporção ~4:3, ~1200px de largura, otimizado (< 300 KB).
+
+Arquivos esperados (foto ausente simplesmente não aparece):
+  sala-01.jpg     -> foto com a placa "SALA 01"
+  sala-02.jpg     -> foto com a placa "SALA 02"
+  sala-03.jpg     -> foto com a placa "SALA 03" (panorâmica)
+  sala-04.jpg     -> foto da 4a sala (se houver)
+  lounge.jpg      -> lounge/recepção com a parede verde
+  ambiente.jpg    -> ambiente com os quadros "FLOW"
+
+Depois de copiar os arquivos, recarregue a página (em produção, rode novamente: npm run build && npm start).
