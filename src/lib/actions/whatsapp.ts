@@ -13,9 +13,15 @@ import {
 import { exigirPermissao } from "./_helpers";
 
 function webhookUrl(): string {
-  if (process.env.WHATSAPP_WEBHOOK_URL) return process.env.WHATSAPP_WEBHOOK_URL;
-  const appUrl = (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
-  return `${appUrl}/api/whatsapp/webhook`;
+  const base = process.env.WHATSAPP_WEBHOOK_URL
+    ? process.env.WHATSAPP_WEBHOOK_URL
+    : `${(process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "")}/api/whatsapp/webhook`;
+  // Reforço de auth: além do header x-webhook-token (definirWebhook), o token também
+  // vai na query (?token=). Assim o webhook é validado mesmo se a Evolution não
+  // repassar headers customizados — evita o cenário "conecta mas nada chega".
+  const token = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
+  if (!token || base.includes("token=")) return base;
+  return `${base}${base.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
 }
 
 export interface StatusWhatsapp {
