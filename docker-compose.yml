@@ -55,10 +55,11 @@ services:
     volumes:
       - miniodata:/data
 
-  # Gateway WhatsApp (Evolution API v2). Usa o Postgres (db "evolution") e o Redis.
+  # Gateway WhatsApp (Evolution API v2 — imagem OFICIAL atual, org evoapicloud).
+  # NÃO usar evoapicloud/evolution-go (reescrita Go, config/API diferentes, incompatível com nossa integração).
   # Crie o banco antes: docker exec espaco_flow_db psql -U dev -c "CREATE DATABASE evolution"
   evolution:
-    image: atendai/evolution-api:v2.2.3
+    image: evoapicloud/evolution-api:latest
     container_name: espaco_flow_evolution
     restart: unless-stopped
     depends_on:
