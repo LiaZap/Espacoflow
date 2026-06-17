@@ -2,6 +2,7 @@ import { provedorConfigurado } from "@/lib/whatsapp/provider";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { ConexaoWhatsapp } from "./_components/conexao-whatsapp";
 import { SimularMensagemForm } from "./_components/simular-mensagem-form";
 import { TestarEnvioForm } from "./_components/testar-envio-form";
 
@@ -13,6 +14,16 @@ export default function WhatsappConfigPage() {
   return (
     <div className="space-y-6 p-8">
       <PageHeader titulo="WhatsApp" descricao="Conexão de mensageria e testes do fluxo da Hígia." />
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Conexão do WhatsApp (Evolution)</CardTitle>
+          <CardDescription>Conecte o número da Hígia escaneando o QR Code.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ConexaoWhatsapp />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

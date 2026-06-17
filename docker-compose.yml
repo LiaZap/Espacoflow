@@ -29,6 +29,65 @@ services:
     volumes:
       - redisdata:/data
 
+  mongo:
+    image: mongo:7
+    container_name: espaco_flow_mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mongo
+      MONGO_INITDB_ROOT_PASSWORD: mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata:/data/db
+
+  minio:
+    image: minio/minio
+    container_name: espaco_flow_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio12345
+    ports:
+      - "9000:9000"   # API S3
+      - "9001:9001"   # Console web
+    volumes:
+      - miniodata:/data
+
+  # Gateway WhatsApp (Evolution API v2). Usa o Postgres (db "evolution") e o Redis.
+  # Crie o banco antes: docker exec espaco_flow_db psql -U dev -c "CREATE DATABASE evolution"
+  evolution:
+    image: atendai/evolution-api:v2.1.1
+    container_name: espaco_flow_evolution
+    restart: unless-stopped
+    depends_on:
+      - db
+      - redis
+    environment:
+      SERVER_URL: http://localhost:8080
+      AUTHENTICATION_API_KEY: flow-evolution-key-troque
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://dev:dev@db:5432/evolution
+      DATABASE_CONNECTION_CLIENT_NAME: evolution
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://redis:6379/6
+      CACHE_REDIS_PREFIX_KEY: evolution
+      CACHE_LOCAL_ENABLED: "false"
+      # Se o QR ficar em loop / não gerar (Baileys reconectando sem parar), defina
+      # a versão ATUAL do WhatsApp Web aqui (formato "2.3000.XXXXXXXXX"). Ex.:
+      # CONFIG_SESSION_PHONE_VERSION: "2.3000.1023204200"
+    ports:
+      - "8080:8080"
+    volumes:
+      - evolution_instances:/evolution/instances
+
 volumes:
   pgdata:
   redisdata:
+  mongodata:
+  miniodata:
+  evolution_instances:

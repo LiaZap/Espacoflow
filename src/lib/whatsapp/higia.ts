@@ -4,7 +4,9 @@ import { whatsappConversas, whatsappMensagens } from "@/lib/db/schema/whatsapp";
 import { agenteConfig } from "@/lib/db/schema/agente";
 import { clientes } from "@/lib/db/schema/clientes";
 import { montarPromptHigia } from "@/lib/agente/montar-prompt";
+import { registrarIaLog } from "@/lib/mongo/client";
 import { getProvider } from "./provider";
+import { enviarHumanizado } from "./humanizar";
 
 export interface ResultadoHigia {
   enviada: boolean;
@@ -81,25 +83,38 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
   }
   if (!texto) return { enviada: false, motivo: "resposta vazia" };
 
+  // Envio HUMANIZADO: "digitando…", mensagens picadas e delays. Cada bloco vira
+  // uma mensagem no thread (como um humano que escreve em rajadas).
   const provider = getProvider();
-  const envio = await provider.enviarTexto(cli?.telefone ?? "", texto);
-  const tempo = Date.now() - inicio;
-
-  await db.insert(whatsappMensagens).values({
-    conversa_id: conversaId,
-    origem: "higia",
-    tipo: "text",
-    conteudo: texto,
-    status: envio.ok ? "sent" : "failed",
-    processada_por_higia: true,
-    tempo_resposta_ms: tempo,
-    enviada_em: new Date(),
-    id_externo: envio.idExterno ?? null,
+  const resultado = await enviarHumanizado(provider, cli?.telefone ?? "", texto, {
+    onBloco: async (bloco, idExterno, ok) => {
+      await db.insert(whatsappMensagens).values({
+        conversa_id: conversaId,
+        origem: "higia",
+        tipo: "text",
+        conteudo: bloco,
+        status: ok ? "sent" : "failed",
+        processada_por_higia: true,
+        tempo_resposta_ms: Date.now() - inicio,
+        enviada_em: new Date(),
+        id_externo: idExterno ?? null,
+      });
+    },
   });
+
   await db
     .update(whatsappConversas)
     .set({ ultima_mensagem_em: new Date() })
     .where(eq(whatsappConversas.id, conversaId));
 
-  return { enviada: envio.ok, motivo: envio.ok ? undefined : envio.erro };
+  await registrarIaLog({
+    conversaId,
+    clienteId: conv.cliente_id,
+    modelo: cfg.modelo_ia,
+    blocos: resultado.blocos,
+    latenciaMs: Date.now() - inicio,
+    resposta: texto,
+  }).catch(() => undefined);
+
+  return { enviada: resultado.algumOk, motivo: resultado.algumOk ? undefined : "falha no envio" };
 }

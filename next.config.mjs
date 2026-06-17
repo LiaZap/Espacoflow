@@ -9,8 +9,8 @@ const nextConfig = {
   poweredByHeader: false,
   // Há outro lockfile em C:\Users\Paulo — fixa a raiz neste projeto.
   outputFileTracingRoot: __dirname,
-  // bullmq/ioredis usam require dinâmico — externaliza (não empacota no bundle).
-  serverExternalPackages: ["bullmq"],
+  // libs Node com require dinâmico / deps opcionais — externaliza (não empacota).
+  serverExternalPackages: ["bullmq", "mongodb", "minio"],
   experimental: {
     serverActions: {
       bodySizeLimit: "5mb",

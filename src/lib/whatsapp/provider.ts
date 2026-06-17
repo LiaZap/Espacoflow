@@ -1,7 +1,6 @@
 /**
  * Camada de provedor WhatsApp (agnóstica). Secrets só via env — nunca no banco.
- * Suporta Evolution API; sem credenciais cai no provedor "sandbox" (apenas loga),
- * permitindo desenvolver e testar o fluxo sem um número real.
+ * Suporta Evolution API; sem credenciais cai no provedor "sandbox" (apenas loga).
  */
 
 export interface MensagemEnviada {
@@ -10,9 +9,13 @@ export interface MensagemEnviada {
   erro?: string;
 }
 
+export type Presenca = "composing" | "paused";
+
 export interface WhatsappProvider {
   nome: string;
   enviarTexto(paraTelefone: string, texto: string): Promise<MensagemEnviada>;
+  /** Indicador "digitando…"/pausado no WhatsApp (comportamento humano). */
+  definirPresenca(paraTelefone: string, estado: Presenca): Promise<void>;
 }
 
 class EvolutionProvider implements WhatsappProvider {
@@ -37,6 +40,18 @@ class EvolutionProvider implements WhatsappProvider {
       return { ok: false, idExterno: null, erro: String(e) };
     }
   }
+
+  async definirPresenca(para: string, estado: Presenca): Promise<void> {
+    try {
+      await fetch(`${this.url}/chat/sendPresence/${this.instancia}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: this.apikey },
+        body: JSON.stringify({ number: para, presence: estado, delay: 1200 }),
+      });
+    } catch {
+      // presença é "best-effort": nunca bloqueia o envio
+    }
+  }
 }
 
 class SandboxProvider implements WhatsappProvider {
@@ -44,6 +59,9 @@ class SandboxProvider implements WhatsappProvider {
   async enviarTexto(para: string, texto: string): Promise<MensagemEnviada> {
     console.log(`[whatsapp:sandbox] -> ${para}: ${texto.slice(0, 160)}`);
     return { ok: true, idExterno: `sandbox-${Date.now()}` };
+  }
+  async definirPresenca(para: string, estado: Presenca): Promise<void> {
+    console.log(`[whatsapp:sandbox] presence ${estado} -> ${para}`);
   }
 }
 

@@ -6,6 +6,8 @@ import {
   whatsappMensagens,
   type WhatsappConversa,
 } from "@/lib/db/schema/whatsapp";
+import { salvarPayloadBruto } from "@/lib/mongo/client";
+import { persistirMidia } from "@/lib/storage/midia";
 
 export interface MensagemNormalizada {
   telefone: string;
@@ -111,17 +113,33 @@ export async function ingerirMensagemRecebida(m: MensagemNormalizada): Promise<R
       .where(eq(whatsappConversas.id, conv.id));
   }
 
+  // Re-hospeda a mídia no MinIO (se houver e estiver acessível); senão mantém a URL original.
+  let midiaFinal = m.midiaUrl ?? null;
+  if (m.midiaUrl) {
+    const persistida = await persistirMidia(m.midiaUrl, m.tipo);
+    if (persistida) midiaFinal = persistida;
+  }
+
   await db.insert(whatsappMensagens).values({
     conversa_id: conv.id,
     origem: "user",
     tipo: m.tipo,
     conteudo: m.texto ?? null,
-    midia_url: m.midiaUrl ?? null,
+    midia_url: midiaFinal,
     midia_tipo: m.tipo !== "text" ? m.tipo : null,
     status: "delivered",
     enviada_em: new Date(),
     id_externo: m.idExterno ?? null,
     payload_bruto: m.payload,
+  });
+
+  // Arquiva o payload bruto também no Mongo (NoSQL flexível p/ a IA).
+  await salvarPayloadBruto({
+    telefone: m.telefone,
+    tipo: m.tipo,
+    conversaId: conv.id,
+    idExterno: m.idExterno ?? null,
+    payload: m.payload,
   });
 
   return { duplicada: false, conversa: conv };

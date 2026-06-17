@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { normalizarEvolution, ingerirMensagemRecebida } from "@/lib/whatsapp/ingestao";
 import { despacharRespostaHigia } from "@/lib/fila/dispatch";
+import { salvarEstadoWhatsapp } from "@/lib/mongo/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,6 +37,25 @@ export async function POST(req: Request) {
     payload = await req.json();
   } catch {
     return NextResponse.json({ erro: "json inválido" }, { status: 400 });
+  }
+
+  // Eventos de conexão/QR da Evolution (não são mensagens).
+  const evento = String((payload as { event?: string }).event ?? "");
+  const instancia = String((payload as { instance?: string }).instance ?? "");
+  if (evento === "qrcode.updated") {
+    const data = (payload as { data?: { qrcode?: { base64?: string }; base64?: string } }).data ?? {};
+    await salvarEstadoWhatsapp(instancia, {
+      qr_base64: data.qrcode?.base64 ?? data.base64 ?? null,
+      estado: "connecting",
+    });
+    return NextResponse.json({ ok: true });
+  }
+  if (evento === "connection.update") {
+    const estado = String((payload as { data?: { state?: string } }).data?.state ?? "");
+    const dados: Record<string, unknown> = { estado };
+    if (estado === "open") dados.qr_base64 = null;
+    await salvarEstadoWhatsapp(instancia, dados);
+    return NextResponse.json({ ok: true });
   }
 
   const normalizada = normalizarEvolution(payload);

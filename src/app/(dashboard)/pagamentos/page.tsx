@@ -1,8 +1,9 @@
 import { listarPagamentos } from "@/lib/actions/pagamentos";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { ValidarPixBotoes } from "./_components/validar-pix-botoes";
+import { ComprovanteUpload } from "./_components/comprovante-upload";
+import { ReciboBotao } from "./_components/recibo-botao";
 import { formatarBRL, formatarDataHora } from "@/lib/utils";
 
 const STATUS_VARIANTE: Record<string, "default" | "secondary" | "success" | "warning" | "destructive"> = {
@@ -52,15 +53,7 @@ export default async function PagamentosPage() {
                     {p.valor ? formatarBRL(Math.round(Number(p.valor) * 100)) : "—"}
                   </td>
                   <td className="px-4 py-3">
-                    {p.comprovante_url ? (
-                      <Button asChild variant="link" size="sm" className="h-auto p-0">
-                        <a href={p.comprovante_url} target="_blank" rel="noreferrer">
-                          ver comprovante
-                        </a>
-                      </Button>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
+                    <ComprovanteUpload id={p.id} atual={p.comprovante_url} />
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{formatarDataHora(p.created_at)}</td>
                   <td className="px-4 py-3">
@@ -74,8 +67,10 @@ export default async function PagamentosPage() {
                           p.valor ? formatarBRL(Math.round(Number(p.valor) * 100)) : "—"
                         } • ${p.reserva_id ? "Reserva" : "Pacote"}`}
                       />
+                    ) : p.status === "confirmado" ? (
+                      <ReciboBotao id={p.id} />
                     ) : (
-                      <span className="text-xs text-muted-foreground">validado</span>
+                      <span className="text-xs text-muted-foreground">{p.status}</span>
                     )}
                   </td>
                 </tr>
