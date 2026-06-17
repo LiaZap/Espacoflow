@@ -58,7 +58,7 @@ services:
   # Gateway WhatsApp (Evolution API v2). Usa o Postgres (db "evolution") e o Redis.
   # Crie o banco antes: docker exec espaco_flow_db psql -U dev -c "CREATE DATABASE evolution"
   evolution:
-    image: atendai/evolution-api:v2.1.1
+    image: atendai/evolution-api:v2.2.3
     container_name: espaco_flow_evolution
     restart: unless-stopped
     depends_on:

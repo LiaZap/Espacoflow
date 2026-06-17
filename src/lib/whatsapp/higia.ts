@@ -4,7 +4,7 @@ import { whatsappConversas, whatsappMensagens } from "@/lib/db/schema/whatsapp";
 import { agenteConfig } from "@/lib/db/schema/agente";
 import { clientes } from "@/lib/db/schema/clientes";
 import { montarPromptHigia } from "@/lib/agente/montar-prompt";
-import { registrarIaLog } from "@/lib/mongo/client";
+import { registrarIaLog, lembrarMemoria } from "@/lib/mongo/client";
 import { getProvider } from "./provider";
 import { enviarHumanizado } from "./humanizar";
 
@@ -54,7 +54,7 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     }));
   if (mensagens.length === 0) return { enviada: false, motivo: "sem conteúdo" };
 
-  const system = await montarPromptHigia();
+  const system = await montarPromptHigia({ clienteId: conv.cliente_id });
   let texto = "";
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -114,6 +114,15 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     blocos: resultado.blocos,
     latenciaMs: Date.now() - inicio,
     resposta: texto,
+  }).catch(() => undefined);
+
+  // Memória do agente: lembra o perfil + última interação deste cliente.
+  await lembrarMemoria(conv.cliente_id, {
+    nome: cli?.nome ?? null,
+    telefone: cli?.telefone ?? null,
+    status_lead: cli?.status_lead ?? null,
+    ultima_interacao: new Date().toISOString(),
+    ultima_resposta: texto.slice(0, 500),
   }).catch(() => undefined);
 
   return { enviada: resultado.algumOk, motivo: resultado.algumOk ? undefined : "falha no envio" };
