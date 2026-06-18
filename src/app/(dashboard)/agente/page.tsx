@@ -1,4 +1,5 @@
 import { obterConfig, previewPrompt, listarPrecos, listarBaseConhecimento } from "@/lib/actions/agente";
+import { listarMidia } from "@/lib/actions/agente-midia";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -6,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatarBRL } from "@/lib/utils";
 import { AgenteConfigForm } from "./_components/agente-config-form";
 import { ChatTeste } from "./_components/chat-teste";
+import { MidiaManager } from "./_components/midia-manager";
 
 export default async function AgentePage() {
   const config = await obterConfig();
@@ -20,10 +22,11 @@ export default async function AgentePage() {
     );
   }
 
-  const [prompt, precos, base] = await Promise.all([
+  const [prompt, precos, base, midias] = await Promise.all([
     previewPrompt(),
     listarPrecos(),
     listarBaseConhecimento(),
+    listarMidia(),
   ]);
 
   return (
@@ -37,6 +40,7 @@ export default async function AgentePage() {
         <TabsList>
           <TabsTrigger value="testar">Testar</TabsTrigger>
           <TabsTrigger value="config">Configuração</TabsTrigger>
+          <TabsTrigger value="midia">Mídia / Fotos</TabsTrigger>
           <TabsTrigger value="prompt">Prompt (preview)</TabsTrigger>
           <TabsTrigger value="conhecimento">Base & Preços</TabsTrigger>
         </TabsList>
@@ -64,6 +68,21 @@ export default async function AgentePage() {
             </CardHeader>
             <CardContent>
               <AgenteConfigForm config={config} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="midia">
+          <Card>
+            <CardHeader>
+              <CardTitle>Mídia que a Hígia envia</CardTitle>
+              <CardDescription>
+                Fotos das salas e PDFs (preços/planos). Quando o cliente quiser ver as salas, a Hígia envia
+                a foto pelo WhatsApp. Use o <strong>identificador</strong> para ela saber qual mídia mandar.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <MidiaManager midias={midias} />
             </CardContent>
           </Card>
         </TabsContent>

@@ -11,9 +11,18 @@ export interface MensagemEnviada {
 
 export type Presenca = "composing" | "paused";
 
+export interface MidiaEnvio {
+  tipo: "image" | "video" | "audio" | "document";
+  url: string;
+  legenda?: string;
+  nomeArquivo?: string;
+}
+
 export interface WhatsappProvider {
   nome: string;
   enviarTexto(paraTelefone: string, texto: string): Promise<MensagemEnviada>;
+  /** Envia foto/arquivo (a Hígia manda fotos das salas, PDFs de preços etc.). */
+  enviarMidia(paraTelefone: string, midia: MidiaEnvio): Promise<MensagemEnviada>;
   /** Indicador "digitando…"/pausado no WhatsApp (comportamento humano). */
   definirPresenca(paraTelefone: string, estado: Presenca): Promise<void>;
 }
@@ -41,6 +50,28 @@ class EvolutionProvider implements WhatsappProvider {
     }
   }
 
+  async enviarMidia(para: string, midia: MidiaEnvio): Promise<MensagemEnviada> {
+    try {
+      const body: Record<string, unknown> = {
+        number: para,
+        mediatype: midia.tipo,
+        media: midia.url,
+      };
+      if (midia.legenda) body.caption = midia.legenda;
+      if (midia.nomeArquivo) body.fileName = midia.nomeArquivo;
+      const res = await fetch(`${this.url}/message/sendMedia/${this.instancia}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: this.apikey },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) return { ok: false, idExterno: null, erro: `HTTP ${res.status}` };
+      const data = (await res.json().catch(() => ({}))) as { key?: { id?: string }; id?: string };
+      return { ok: true, idExterno: data?.key?.id ?? data?.id ?? null };
+    } catch (e) {
+      return { ok: false, idExterno: null, erro: String(e) };
+    }
+  }
+
   async definirPresenca(para: string, estado: Presenca): Promise<void> {
     try {
       await fetch(`${this.url}/chat/sendPresence/${this.instancia}`, {
@@ -58,6 +89,10 @@ class SandboxProvider implements WhatsappProvider {
   nome = "sandbox";
   async enviarTexto(para: string, texto: string): Promise<MensagemEnviada> {
     console.log(`[whatsapp:sandbox] -> ${para}: ${texto.slice(0, 160)}`);
+    return { ok: true, idExterno: `sandbox-${Date.now()}` };
+  }
+  async enviarMidia(para: string, midia: MidiaEnvio): Promise<MensagemEnviada> {
+    console.log(`[whatsapp:sandbox] mídia ${midia.tipo} -> ${para}: ${midia.url}`);
     return { ok: true, idExterno: `sandbox-${Date.now()}` };
   }
   async definirPresenca(para: string, estado: Presenca): Promise<void> {

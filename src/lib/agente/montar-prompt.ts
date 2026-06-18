@@ -1,8 +1,9 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { agenteConfig, agentePrecos, agenteBaseConhecimento } from "@/lib/db/schema/agente";
+import { agenteConfig, agentePrecos, agenteBaseConhecimento, agenteMidia } from "@/lib/db/schema/agente";
 import { clientes } from "@/lib/db/schema/clientes";
 import { obterMemoria } from "@/lib/mongo/client";
+import { slugMidia } from "@/lib/whatsapp/midia-marcadores";
 import { formatarBRL } from "@/lib/utils";
 import { PROMPT_BASE_HIGIA } from "./prompt-base";
 
@@ -60,8 +61,32 @@ export async function montarPromptHigia(opts?: { clienteId?: string }): Promise<
       new Date().toLocaleString("pt-BR", { timeZone: config?.timezone ?? "America/Sao_Paulo" })
     );
 
-  if (!opts?.clienteId) return prompt;
-  return prompt + (await blocoMemoria(opts.clienteId));
+  const midia = await blocoMidia();
+  const memoria = opts?.clienteId ? await blocoMemoria(opts.clienteId) : "";
+  return prompt + midia + memoria;
+}
+
+/** Lista as fotos/arquivos que a Hígia pode ENVIAR, com os marcadores certos. */
+async function blocoMidia(): Promise<string> {
+  const itens = await db
+    .select()
+    .from(agenteMidia)
+    .where(and(eq(agenteMidia.is_deleted, false), eq(agenteMidia.ativo, true)));
+  if (itens.length === 0) return "";
+
+  const linhas = itens.map((m) => {
+    const id = slugMidia(m.tags || m.nome);
+    const desc = m.descricao ? ` — ${m.descricao}` : "";
+    return `- ${id}: ${m.nome}${desc}`;
+  });
+
+  return `\n\n<midia_disponivel>
+Você pode ENVIAR estas fotos/arquivos pelo WhatsApp. Para enviar um, escreva o marcador EXATAMENTE assim, sozinho numa linha: [FOTO: identificador]. Pode enviar vários (um marcador por linha).
+Envie só quando fizer sentido (o cliente quer conhecer/ver as salas, pediu fotos, está decidindo). Não despeje todas as fotos sem o cliente pedir.
+NUNCA escreva a palavra "marcador", não cite o identificador em voz alta e não anuncie que vai mandar foto — apenas inclua o marcador e siga a conversa naturalmente.
+Disponíveis (identificador: descrição):
+${linhas.join("\n")}
+</midia_disponivel>`;
 }
 
 /** Bloco de memória do cliente (perfil no Postgres + notas no Mongo). */

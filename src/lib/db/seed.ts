@@ -5,7 +5,7 @@ import { db } from "./index";
 import { usuarios } from "./schema/usuarios";
 import { salas, salasHorarios } from "./schema/salas";
 import { pacotes, politicaCancelamento } from "./schema/pacotes";
-import { agenteConfig, agentePrecos, agenteBaseConhecimento } from "./schema/agente";
+import { agenteConfig, agentePrecos, agenteBaseConhecimento, agenteMidia } from "./schema/agente";
 import { lgpdConfig } from "./schema/lgpd";
 import {
   OWNER_SEED,
@@ -102,6 +102,30 @@ async function main() {
     if (!ex) await db.insert(agenteBaseConhecimento).values({ ...b, modified_by: ownerId });
   }
   console.log("✓ base de conhecimento garantida");
+
+  // --- Mídia da Hígia (fotos das salas, servidas de /public/salas) ---
+  const MIDIA_SEED = [
+    { nome: "Sala Privativa 01", tags: "sala-01", descricao: "Sala privativa para atendimento individual.", arquivo: "/salas/sala-01.jpg" },
+    { nome: "Sala Privativa 02", tags: "sala-02", descricao: "Sala privativa para reuniões e mentorias.", arquivo: "/salas/sala-02.jpg" },
+    { nome: "Sala Privativa 03", tags: "sala-03", descricao: "Sala privativa equipada para consultas.", arquivo: "/salas/sala-03.jpg" },
+    { nome: "Lounge / Convivência", tags: "lounge", descricao: "Espaço de convivência e espera.", arquivo: "/salas/lounge.jpg" },
+    { nome: "Ambiente do Espaço", tags: "ambiente", descricao: "Visão geral do coworking.", arquivo: "/salas/ambiente.jpg" },
+  ];
+  for (const md of MIDIA_SEED) {
+    const [ex] = await db.select().from(agenteMidia).where(eq(agenteMidia.nome, md.nome));
+    if (!ex) {
+      await db.insert(agenteMidia).values({
+        nome: md.nome,
+        descricao: md.descricao,
+        tags: md.tags,
+        arquivo_url: md.arquivo,
+        tipo_arquivo: "image/jpeg",
+        nome_arquivo: md.arquivo.split("/").pop() ?? null,
+        modified_by: ownerId,
+      });
+    }
+  }
+  console.log("✓ mídia da Hígia (fotos das salas) garantida");
 
   // --- LGPD config ---
   const lg = await db.select().from(lgpdConfig);

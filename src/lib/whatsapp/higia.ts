@@ -7,6 +7,7 @@ import { montarPromptHigia } from "@/lib/agente/montar-prompt";
 import { registrarIaLog, lembrarMemoria } from "@/lib/mongo/client";
 import { getProvider } from "./provider";
 import { enviarHumanizado, limparTextoHigia } from "./humanizar";
+import { extrairMarcadores, resolverMidia, urlMidiaAbsoluta, tipoWhatsapp } from "./midia-marcadores";
 
 export interface ResultadoHigia {
   enviada: boolean;
@@ -84,24 +85,66 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
   if (!texto) return { enviada: false, motivo: "resposta vazia" };
   texto = limparTextoHigia(texto);
 
-  // Envio HUMANIZADO: "digitando…", mensagens picadas e delays. Cada bloco vira
-  // uma mensagem no thread (como um humano que escreve em rajadas).
+  // A Hígia pode pedir para enviar fotos via marcador [FOTO: id]. Separa os
+  // marcadores: manda o texto LIMPO (sem o marcador) e depois envia as fotos.
+  const { texto: textoLimpo, tokens } = extrairMarcadores(texto);
+
   const provider = getProvider();
-  const resultado = await enviarHumanizado(provider, cli?.telefone ?? "", texto, {
-    onBloco: async (bloco, idExterno, ok) => {
-      await db.insert(whatsappMensagens).values({
-        conversa_id: conversaId,
-        origem: "higia",
-        tipo: "text",
-        conteudo: bloco,
-        status: ok ? "sent" : "failed",
-        processada_por_higia: true,
-        tempo_resposta_ms: Date.now() - inicio,
-        enviada_em: new Date(),
-        id_externo: idExterno ?? null,
-      });
-    },
-  });
+  const telefone = cli?.telefone ?? "";
+  let algumOk = false;
+  let blocosTexto = 0;
+  let blocosMidia = 0;
+
+  // Texto HUMANIZADO: "digitando…", mensagens picadas e delays.
+  if (textoLimpo) {
+    const r = await enviarHumanizado(provider, telefone, textoLimpo, {
+      onBloco: async (bloco, idExterno, ok) => {
+        await db.insert(whatsappMensagens).values({
+          conversa_id: conversaId,
+          origem: "higia",
+          tipo: "text",
+          conteudo: bloco,
+          status: ok ? "sent" : "failed",
+          processada_por_higia: true,
+          tempo_resposta_ms: Date.now() - inicio,
+          enviada_em: new Date(),
+          id_externo: idExterno ?? null,
+        });
+      },
+    });
+    blocosTexto = r.blocos;
+    algumOk = algumOk || r.algumOk;
+  }
+
+  // Fotos/arquivos pedidos pela Hígia (resolvidos na biblioteca agente_midia).
+  for (const token of tokens) {
+    const m = await resolverMidia(token);
+    if (!m) continue;
+    const tipo = tipoWhatsapp(m.tipo_arquivo);
+    const url = urlMidiaAbsoluta(m.arquivo_url);
+    const legenda = m.descricao || m.nome;
+    await provider.definirPresenca(telefone, "composing").catch(() => undefined);
+    const envio = await provider.enviarMidia(telefone, {
+      tipo,
+      url,
+      legenda,
+      nomeArquivo: m.nome_arquivo ?? undefined,
+    });
+    algumOk = algumOk || envio.ok;
+    blocosMidia += 1;
+    await db.insert(whatsappMensagens).values({
+      conversa_id: conversaId,
+      origem: "higia",
+      tipo,
+      conteudo: legenda,
+      midia_url: url,
+      midia_tipo: m.tipo_arquivo,
+      status: envio.ok ? "sent" : "failed",
+      processada_por_higia: true,
+      enviada_em: new Date(),
+      id_externo: envio.idExterno ?? null,
+    });
+  }
 
   await db
     .update(whatsappConversas)
@@ -112,7 +155,7 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     conversaId,
     clienteId: conv.cliente_id,
     modelo: cfg.modelo_ia,
-    blocos: resultado.blocos,
+    blocos: blocosTexto + blocosMidia,
     latenciaMs: Date.now() - inicio,
     resposta: texto,
   }).catch(() => undefined);
@@ -126,5 +169,5 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     ultima_resposta: texto.slice(0, 500),
   }).catch(() => undefined);
 
-  return { enviada: resultado.algumOk, motivo: resultado.algumOk ? undefined : "falha no envio" };
+  return { enviada: algumOk, motivo: algumOk ? undefined : "falha no envio" };
 }

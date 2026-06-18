@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { testarHigia, type TesteMsg } from "@/lib/actions/agente";
+import { testarHigia, type TesteMsg, type TesteMidia } from "@/lib/actions/agente";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-type Bolha = { autor: "voce" | "higia"; texto: string };
+type Bolha = { autor: "voce" | "higia"; texto?: string; midia?: TesteMidia };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const jitter = (ms: number) => Math.round(ms * (0.85 + Math.random() * 0.3));
@@ -24,17 +24,19 @@ function construirHistorico(bolhas: Bolha[]): TesteMsg[] {
   const out: TesteMsg[] = [];
   for (const b of bolhas) {
     const role: TesteMsg["role"] = b.autor === "voce" ? "user" : "assistant";
+    const conteudo = b.texto ?? (b.midia ? `[foto enviada: ${b.midia.legenda}]` : "");
+    if (!conteudo) continue;
     const ultimo = out[out.length - 1];
-    if (ultimo && ultimo.role === role) ultimo.content += "\n" + b.texto;
-    else out.push({ role, content: b.texto });
+    if (ultimo && ultimo.role === role) ultimo.content += "\n" + conteudo;
+    else out.push({ role, content: conteudo });
   }
   return out;
 }
 
 /**
  * Chat interno de teste da Hígia. Conversa direto com o agente (prompt/modelo/base
- * reais), sem WhatsApp e sem gravar nada. Simula o ritmo humano: "digitando…" + delay
- * entre balões, igual ao envio real no WhatsApp.
+ * reais), sem WhatsApp e sem gravar nada. Simula o ritmo humano ("digitando…" +
+ * delay) e mostra as fotos que a Hígia decidir enviar.
  */
 export function ChatTeste({ nomeAgente, modelo }: { nomeAgente: string; modelo: string }) {
   const [historico, setHistorico] = useState<Bolha[]>([]);
@@ -62,22 +64,27 @@ export function ChatTeste({ nomeAgente, modelo }: { nomeAgente: string; modelo: 
 
     try {
       const r = await testarHigia(construirHistorico(comUsuario));
-      if (r.erro || !r.blocos?.length) {
+      if (r.erro || (!r.blocos?.length && !r.midias?.length)) {
         setDigitando(false);
         setErro(r.erro ?? "A Hígia não respondeu.");
         return;
       }
 
-      // "Lendo" antes de começar a digitar.
-      await sleep(jitter(900));
-      for (let i = 0; i < r.blocos.length; i++) {
-        const bloco = r.blocos[i];
+      await sleep(jitter(900)); // "lendo" antes de digitar
+      for (const bloco of r.blocos ?? []) {
         setDigitando(true);
         const tempo = Math.min(4000, Math.max(600, (bloco.length / 16) * 1000));
         await sleep(jitter(tempo));
         setDigitando(false);
         setHistorico((h) => [...h, { autor: "higia", texto: bloco }]);
-        if (i < r.blocos.length - 1) await sleep(jitter(450));
+        await sleep(jitter(450));
+      }
+      for (const midia of r.midias ?? []) {
+        setDigitando(true);
+        await sleep(jitter(1100)); // tempo de "enviar a foto"
+        setDigitando(false);
+        setHistorico((h) => [...h, { autor: "higia", midia }]);
+        await sleep(jitter(450));
       }
     } catch (err) {
       setErro(String(err));
@@ -113,26 +120,46 @@ export function ChatTeste({ nomeAgente, modelo }: { nomeAgente: string; modelo: 
           <p className="mx-auto mt-8 max-w-sm text-center text-sm text-muted-foreground">
             Mande uma mensagem como se fosse um cliente no WhatsApp.
             <br />
-            Ex: <span className="italic">“Oi, queria saber sobre as salas privativas”</span>.
+            Ex: <span className="italic">“Oi, queria ver as salas”</span> (ela pode mandar fotos).
           </p>
         ) : null}
 
-        {historico.map((b, i) =>
-          b.autor === "voce" ? (
-            <div key={i} className="flex justify-end">
-              <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
-                {b.texto}
+        {historico.map((b, i) => {
+          if (b.autor === "voce") {
+            return (
+              <div key={i} className="flex justify-end">
+                <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
+                  {b.texto}
+                </div>
               </div>
-            </div>
-          ) : (
+            );
+          }
+          if (b.midia) {
+            return (
+              <div key={i} className="flex justify-start">
+                <div className="max-w-[70%] overflow-hidden rounded-2xl rounded-bl-sm bg-muted p-1">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={b.midia.url}
+                    alt={b.midia.nome}
+                    className="max-h-64 w-full rounded-xl object-cover"
+                  />
+                  {b.midia.legenda ? (
+                    <p className="px-2 py-1.5 text-sm">{b.midia.legenda}</p>
+                  ) : null}
+                </div>
+              </div>
+            );
+          }
+          return (
             <div key={i} className="flex justify-start">
               <div
                 className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-bl-sm bg-muted px-3 py-2 text-sm [&_strong]:font-semibold"
-                dangerouslySetInnerHTML={{ __html: formatarWhats(b.texto) }}
+                dangerouslySetInnerHTML={{ __html: formatarWhats(b.texto ?? "") }}
               />
             </div>
-          )
-        )}
+          );
+        })}
 
         {digitando ? (
           <div className="flex justify-start">

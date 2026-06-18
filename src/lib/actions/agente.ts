@@ -8,6 +8,12 @@ import { configAgenteSchema } from "@/lib/validators/agente";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { montarPromptHigia } from "@/lib/agente/montar-prompt";
 import { picarMensagem, limparTextoHigia } from "@/lib/whatsapp/humanizar";
+import {
+  extrairMarcadores,
+  resolverMidia,
+  urlMidiaAbsoluta,
+  tipoWhatsapp,
+} from "@/lib/whatsapp/midia-marcadores";
 import { exigirPermissao, atualizarComLock, primeiroErro } from "./_helpers";
 
 export async function obterConfig() {
@@ -44,7 +50,13 @@ export async function listarBaseConhecimento() {
 }
 
 export type TesteMsg = { role: "user" | "assistant"; content: string };
-export type TesteResultado = { blocos?: string[]; modelo?: string; erro?: string };
+export type TesteMidia = { url: string; nome: string; legenda: string; tipo: string };
+export type TesteResultado = {
+  blocos?: string[];
+  midias?: TesteMidia[];
+  modelo?: string;
+  erro?: string;
+};
 
 /**
  * Chat de teste da Hígia (playground). Usa o MESMO prompt/modelo/base reais,
@@ -87,7 +99,21 @@ export async function testarHigia(mensagens: TesteMsg[]): Promise<TesteResultado
       .join("\n")
       .trim();
     if (!texto) return { erro: "A Hígia não respondeu (resposta vazia).", modelo };
-    return { blocos: picarMensagem(limparTextoHigia(texto)), modelo };
+
+    const { texto: textoLimpo, tokens } = extrairMarcadores(limparTextoHigia(texto));
+    const midias: TesteMidia[] = [];
+    for (const token of tokens) {
+      const m = await resolverMidia(token);
+      if (m) {
+        midias.push({
+          url: urlMidiaAbsoluta(m.arquivo_url),
+          nome: m.nome,
+          legenda: m.descricao || m.nome,
+          tipo: tipoWhatsapp(m.tipo_arquivo),
+        });
+      }
+    }
+    return { blocos: textoLimpo ? picarMensagem(textoLimpo) : [], midias, modelo };
   } catch (e) {
     return { erro: String(e), modelo };
   }
