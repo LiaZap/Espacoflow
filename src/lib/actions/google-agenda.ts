@@ -9,16 +9,33 @@ import { exigirPermissao } from "./_helpers";
 
 export type AgendaFormState = { erro?: string; ok?: boolean };
 
-/** Config single-row da agenda (cria se não existir). */
-export async function obterAgendaConfig() {
+/** Apenas campos não-sensíveis (NUNCA expor refresh_token/access_token ao cliente). */
+export type AgendaConfigPublica = {
+  id: string;
+  conectado: boolean;
+  conta_email: string | null;
+  calendar_id: string;
+  sincronizar: boolean;
+};
+
+const COLS_PUBLICAS = {
+  id: googleAgendaConfig.id,
+  conectado: googleAgendaConfig.conectado,
+  conta_email: googleAgendaConfig.conta_email,
+  calendar_id: googleAgendaConfig.calendar_id,
+  sincronizar: googleAgendaConfig.sincronizar,
+};
+
+/** Config single-row da agenda (cria se não existir). Projeta só campos seguros. */
+export async function obterAgendaConfig(): Promise<AgendaConfigPublica> {
   await exigirPermissao("configuracoes", "ler");
   const [c] = await db
-    .select()
+    .select(COLS_PUBLICAS)
     .from(googleAgendaConfig)
     .where(eq(googleAgendaConfig.is_deleted, false))
     .limit(1);
   if (c) return c;
-  const [novo] = await db.insert(googleAgendaConfig).values({}).returning();
+  const [novo] = await db.insert(googleAgendaConfig).values({}).returning(COLS_PUBLICAS);
   return novo;
 }
 

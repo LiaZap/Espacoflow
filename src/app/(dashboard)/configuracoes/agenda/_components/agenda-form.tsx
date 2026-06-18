@@ -6,8 +6,8 @@ import {
   salvarAgendaConfig,
   desconectarAgenda,
   type AgendaFormState,
+  type AgendaConfigPublica,
 } from "@/lib/actions/google-agenda";
-import type { GoogleAgendaConfig } from "@/lib/db/schema/integracoes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,7 +24,7 @@ function Salvar() {
   );
 }
 
-export function AgendaForm({ config }: { config: GoogleAgendaConfig }) {
+export function AgendaForm({ config }: { config: AgendaConfigPublica }) {
   const [state, action] = useActionState<AgendaFormState, FormData>(salvarAgendaConfig, {});
   const [pendente, startTransition] = useTransition();
   const [erro, setErro] = useState<string | null>(null);

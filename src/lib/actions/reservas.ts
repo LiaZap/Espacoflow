@@ -242,6 +242,54 @@ export async function cancelarReserva(id: string): Promise<{ erro?: string }> {
   return {};
 }
 
+/** Check-in: marca a reserva como concluída (compareceu) ou no_show (faltou). */
+async function transicionarReserva(
+  id: string,
+  novoStatus: "concluida" | "no_show",
+  rotulo: string
+): Promise<{ erro?: string }> {
+  const sessao = await exigirPermissao("reservas", "atualizar");
+  try {
+    await db.transaction(async (tx) => {
+      const [rsv] = await tx
+        .select()
+        .from(reservas)
+        .where(and(eq(reservas.id, id), eq(reservas.is_deleted, false)))
+        .for("update");
+      if (!rsv) throw new ReservaError("Reserva não encontrada.");
+      if (rsv.status_reserva === "cancelada") throw new ReservaError("Reserva cancelada não pode receber check-in.");
+      if (rsv.status_reserva === novoStatus) return;
+      await tx
+        .update(reservas)
+        .set({ status_reserva: novoStatus, updated_at: new Date(), modified_by: sessao.userId })
+        .where(eq(reservas.id, id));
+    });
+  } catch (e: unknown) {
+    if (e instanceof ReservaError) return { erro: e.message };
+    return { erro: "Não foi possível registrar o check-in." };
+  }
+
+  await registrarAuditoria({
+    userId: sessao.userId,
+    acao: "atualizar",
+    entidade: "reservas",
+    registroId: id,
+    detalhes: `Check-in: ${rotulo}`,
+  });
+  revalidatePath("/reservas");
+  revalidatePath("/clientes");
+  revalidatePath("/relatorios");
+  return {};
+}
+
+export async function concluirReserva(id: string): Promise<{ erro?: string }> {
+  return transicionarReserva(id, "concluida", "compareceu (concluída)");
+}
+
+export async function marcarNoShow(id: string): Promise<{ erro?: string }> {
+  return transicionarReserva(id, "no_show", "não compareceu (no_show)");
+}
+
 export type SalaDisponibilidade = {
   id: string;
   nome: string;

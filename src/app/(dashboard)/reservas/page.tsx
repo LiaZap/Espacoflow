@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CancelarReservaBotao } from "./_components/cancelar-reserva-botao";
+import { CheckinBotoes } from "./_components/checkin-botoes";
 import { formatarDataHora } from "@/lib/utils";
 
 const STATUS_VARIANTE: Record<string, "default" | "secondary" | "success" | "warning" | "destructive"> = {
@@ -73,17 +74,24 @@ export default async function ReservasPage() {
                     </Badge>
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{r.status_pagamento}</td>
-                  <td className="px-4 py-3 text-right">
-                    {r.status_reserva !== "cancelada" && r.status_reserva !== "concluida" ? (
-                      <CancelarReservaBotao
-                        id={r.id}
-                        resumo={`${r.sala_nome} • ${r.cliente_nome} • ${
-                          r.inicio_em ? formatarDataHora(r.inicio_em) : `${r.data} ${r.hora}`
-                        }`}
-                      />
-                    ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    )}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-end gap-1">
+                      {r.status_reserva === "cancelada" ? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      ) : (
+                        <>
+                          <CheckinBotoes id={r.id} status={r.status_reserva} />
+                          {r.status_reserva !== "concluida" ? (
+                            <CancelarReservaBotao
+                              id={r.id}
+                              resumo={`${r.sala_nome} • ${r.cliente_nome} • ${
+                                r.inicio_em ? formatarDataHora(r.inicio_em) : `${r.data} ${r.hora}`
+                              }`}
+                            />
+                          ) : null}
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
