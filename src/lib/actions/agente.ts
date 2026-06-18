@@ -14,6 +14,7 @@ import {
   urlMidiaAbsoluta,
   tipoWhatsapp,
 } from "@/lib/whatsapp/midia-marcadores";
+import { extrairPix, montarMensagensPix } from "@/lib/whatsapp/pix";
 import { exigirPermissao, atualizarComLock, primeiroErro } from "./_helpers";
 
 export async function obterConfig() {
@@ -100,9 +101,13 @@ export async function testarHigia(mensagens: TesteMsg[]): Promise<TesteResultado
       .trim();
     if (!texto) return { erro: "A Hígia não respondeu (resposta vazia).", modelo };
 
-    const { texto: textoLimpo, tokens } = extrairMarcadores(limparTextoHigia(texto));
+    const marc = extrairMarcadores(limparTextoHigia(texto));
+    const pix = extrairPix(marc.texto);
+    const blocos = pix.texto ? picarMensagem(pix.texto) : [];
+    if (pix.temPix) blocos.push(...montarMensagensPix(cfg));
+
     const midias: TesteMidia[] = [];
-    for (const token of tokens) {
+    for (const token of marc.tokens) {
       const m = await resolverMidia(token);
       if (m) {
         midias.push({
@@ -113,7 +118,7 @@ export async function testarHigia(mensagens: TesteMsg[]): Promise<TesteResultado
         });
       }
     }
-    return { blocos: textoLimpo ? picarMensagem(textoLimpo) : [], midias, modelo };
+    return { blocos, midias, modelo };
   } catch (e) {
     return { erro: String(e), modelo };
   }
@@ -138,6 +143,10 @@ export async function salvarConfig(_prev: FormState, formData: FormData): Promis
     hora_inicio: d.hora_inicio ? `${d.hora_inicio}:00` : null,
     hora_fim: d.hora_fim ? `${d.hora_fim}:00` : null,
     prompt_sistema: d.prompt_sistema || null,
+    pix_chave: d.pix_chave || null,
+    pix_beneficiario: d.pix_beneficiario || null,
+    pix_copia_cola: d.pix_copia_cola || null,
+    pix_instrucoes: d.pix_instrucoes || null,
     resposta_automatica: formData.get("resposta_automatica") !== "false",
     reserva_via_ia: formData.get("reserva_via_ia") !== "false",
     modified_by: sessao.userId,

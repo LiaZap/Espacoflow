@@ -14,6 +14,10 @@ export const configAgenteSchema = z.object({
   hora_inicio: horaOpcional,
   hora_fim: horaOpcional,
   prompt_sistema: z.string().trim().optional(),
+  pix_chave: z.string().trim().optional(),
+  pix_beneficiario: z.string().trim().optional(),
+  pix_copia_cola: z.string().trim().optional(),
+  pix_instrucoes: z.string().trim().optional(),
 });
 
 export type ConfigAgenteInput = z.infer<typeof configAgenteSchema>;

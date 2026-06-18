@@ -61,9 +61,18 @@ export async function montarPromptHigia(opts?: { clienteId?: string }): Promise<
       new Date().toLocaleString("pt-BR", { timeZone: config?.timezone ?? "America/Sao_Paulo" })
     );
 
+  const pix = blocoPix(config);
   const midia = await blocoMidia();
   const memoria = opts?.clienteId ? await blocoMemoria(opts.clienteId) : "";
-  return prompt + midia + memoria;
+  return prompt + pix + midia + memoria;
+}
+
+/** Instrui a Hígia a usar o marcador [PIX] (o sistema injeta a chave correta). */
+function blocoPix(config?: { pix_chave?: string | null } | null): string {
+  if (!config?.pix_chave?.trim()) return "";
+  return `\n\n<pagamento_pix>
+Quando o cliente confirmar que vai pagar (ou pedir a chave Pix), escreva o marcador [PIX] sozinho numa linha — o sistema envia os dados do Pix automaticamente, com a chave correta. NUNCA escreva ou invente a chave Pix você mesma. Não confirme o pagamento (quem confirma é a equipe, após o comprovante).
+</pagamento_pix>`;
 }
 
 /** Lista as fotos/arquivos que a Hígia pode ENVIAR, com os marcadores certos. */

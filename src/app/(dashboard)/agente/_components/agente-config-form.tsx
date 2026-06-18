@@ -74,6 +74,39 @@ export function AgenteConfigForm({ config }: { config: AgenteConfig }) {
         <Textarea name="prompt_sistema" rows={6} defaultValue={config.prompt_sistema ?? ""} />
       </Campo>
 
+      <div className="space-y-4 rounded-md border p-4">
+        <div>
+          <p className="text-sm font-medium">Pix (a Hígia envia como texto)</p>
+          <p className="text-xs text-muted-foreground">
+            Quando o cliente vai pagar, a Hígia manda a chave exata aqui cadastrada. Deixe a chave vazia
+            para desativar.
+          </p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Campo label="Chave Pix">
+            <Input name="pix_chave" defaultValue={config.pix_chave ?? ""} placeholder="CNPJ, e-mail, telefone ou aleatória" />
+          </Campo>
+          <Campo label="Favorecido (nome)">
+            <Input name="pix_beneficiario" defaultValue={config.pix_beneficiario ?? ""} placeholder="Ex: Felipe Geraldo Torres LTDA" />
+          </Campo>
+        </div>
+        <Campo label="Pix copia e cola (opcional)">
+          <Textarea
+            name="pix_copia_cola"
+            rows={2}
+            defaultValue={config.pix_copia_cola ?? ""}
+            placeholder="Cole aqui o código copia e cola, se tiver. A Hígia envia numa mensagem separada para o cliente copiar."
+          />
+        </Campo>
+        <Campo label="Instrução após o Pix (opcional)">
+          <Input
+            name="pix_instrucoes"
+            defaultValue={config.pix_instrucoes ?? ""}
+            placeholder="Padrão: peça o comprovante e avise que a equipe confirma."
+          />
+        </Campo>
+      </div>
+
       {state?.erro ? (
         <p className="text-sm text-destructive" role="alert">
           {state.erro}

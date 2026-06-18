@@ -19,3 +19,4 @@ export * from "./agente";
 export * from "./jobs";
 export * from "./lgpd";
 export * from "./documentos";
+export * from "./integracoes";

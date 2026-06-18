@@ -1,0 +1,75 @@
+/**
+ * OAuth do Google (Calendar) — fluxo manual (sem dependência googleapis).
+ * Credenciais do app via env: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET e
+ * (opcional) GOOGLE_REDIRECT_URI. Escopo: calendar.events + email.
+ */
+const SCOPE = "openid email https://www.googleapis.com/auth/calendar.events";
+
+export function googleConfigurado(): boolean {
+  return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+}
+
+export function redirectUri(): string {
+  if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
+  const base = (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  return `${base}/api/google/oauth/callback`;
+}
+
+/** URL de consentimento do Google (offline + consent → garante refresh_token). */
+export function urlConsentimento(): string {
+  const p = new URLSearchParams({
+    client_id: process.env.GOOGLE_CLIENT_ID ?? "",
+    redirect_uri: redirectUri(),
+    response_type: "code",
+    access_type: "offline",
+    prompt: "consent",
+    include_granted_scopes: "true",
+    scope: SCOPE,
+  });
+  return `https://accounts.google.com/o/oauth2/v2/auth?${p.toString()}`;
+}
+
+export interface TokensGoogle {
+  refresh_token: string | null;
+  access_token: string;
+  expira_em: Date;
+  email: string | null;
+}
+
+/** Troca o code do callback por tokens e descobre o e-mail da conta. */
+export async function trocarCodigo(code: string): Promise<TokensGoogle> {
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code,
+      client_id: process.env.GOOGLE_CLIENT_ID ?? "",
+      client_secret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      redirect_uri: redirectUri(),
+      grant_type: "authorization_code",
+    }),
+  });
+  if (!res.ok) throw new Error(`token HTTP ${res.status}`);
+  const t = (await res.json()) as {
+    access_token: string;
+    refresh_token?: string;
+    expires_in?: number;
+  };
+
+  let email: string | null = null;
+  try {
+    const u = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+      headers: { authorization: `Bearer ${t.access_token}` },
+    });
+    if (u.ok) email = ((await u.json()) as { email?: string }).email ?? null;
+  } catch {
+    // e-mail é informativo; não bloqueia a conexão
+  }
+
+  return {
+    refresh_token: t.refresh_token ?? null,
+    access_token: t.access_token,
+    expira_em: new Date(Date.now() + (t.expires_in ?? 3600) * 1000),
+    email,
+  };
+}

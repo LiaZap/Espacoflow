@@ -8,6 +8,7 @@ import { registrarIaLog, lembrarMemoria } from "@/lib/mongo/client";
 import { getProvider } from "./provider";
 import { enviarHumanizado, limparTextoHigia } from "./humanizar";
 import { extrairMarcadores, resolverMidia, urlMidiaAbsoluta, tipoWhatsapp } from "./midia-marcadores";
+import { extrairPix, montarMensagensPix } from "./pix";
 
 export interface ResultadoHigia {
   enviada: boolean;
@@ -85,9 +86,12 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
   if (!texto) return { enviada: false, motivo: "resposta vazia" };
   texto = limparTextoHigia(texto);
 
-  // A Hígia pode pedir para enviar fotos via marcador [FOTO: id]. Separa os
-  // marcadores: manda o texto LIMPO (sem o marcador) e depois envia as fotos.
-  const { texto: textoLimpo, tokens } = extrairMarcadores(texto);
+  // A Hígia pode pedir fotos ([FOTO: id]) e o Pix ([PIX]). Separa os marcadores:
+  // manda o texto LIMPO e depois envia Pix (texto) e fotos.
+  const marc = extrairMarcadores(texto);
+  const pix = extrairPix(marc.texto);
+  const textoLimpo = pix.texto;
+  const tokens = marc.tokens;
 
   const provider = getProvider();
   const telefone = cli?.telefone ?? "";
@@ -114,6 +118,26 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     });
     blocosTexto = r.blocos;
     algumOk = algumOk || r.algumOk;
+  }
+
+  // Pix (texto) pedido pela Hígia via [PIX] — chave exata vem da config.
+  if (pix.temPix) {
+    for (const msg of montarMensagensPix(cfg)) {
+      await provider.definirPresenca(telefone, "composing").catch(() => undefined);
+      const envio = await provider.enviarTexto(telefone, msg);
+      algumOk = algumOk || envio.ok;
+      blocosTexto += 1;
+      await db.insert(whatsappMensagens).values({
+        conversa_id: conversaId,
+        origem: "higia",
+        tipo: "text",
+        conteudo: msg,
+        status: envio.ok ? "sent" : "failed",
+        processada_por_higia: true,
+        enviada_em: new Date(),
+        id_externo: envio.idExterno ?? null,
+      });
+    }
   }
 
   // Fotos/arquivos pedidos pela Hígia (resolvidos na biblioteca agente_midia).

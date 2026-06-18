@@ -36,6 +36,12 @@ export const agenteConfig = pgTable("agente_config", {
   delay_max_seg: integer("delay_max_seg").notNull().default(6),
   timezone: text("timezone").notNull().default("America/Sao_Paulo"),
 
+  // Pix enviado pela Hígia como TEXTO (Evolution não envia botões).
+  pix_chave: text("pix_chave"),
+  pix_beneficiario: text("pix_beneficiario"),
+  pix_copia_cola: text("pix_copia_cola"),
+  pix_instrucoes: text("pix_instrucoes"),
+
   created_at: timestamp("created_at").notNull().defaultNow(),
   updated_at: timestamp("updated_at").notNull().defaultNow(),
   deleted_at: timestamp("deleted_at"),
