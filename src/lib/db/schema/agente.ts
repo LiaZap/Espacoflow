@@ -22,7 +22,7 @@ export const agenteConfig = pgTable("agente_config", {
   ativo: boolean("ativo").notNull().default(true),
   resposta_automatica: boolean("resposta_automatica").notNull().default(true),
   prompt_sistema: text("prompt_sistema"),
-  modelo_ia: text("modelo_ia").notNull().default("claude-opus-4-8"),
+  modelo_ia: text("modelo_ia").notNull().default("claude-haiku-4-5"),
   quebra_mensagem: boolean("quebra_mensagem").notNull().default(true),
   reserva_via_ia: boolean("reserva_via_ia").notNull().default(true),
   audio_resposta: boolean("audio_resposta").notNull().default(false),

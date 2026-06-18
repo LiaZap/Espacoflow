@@ -65,7 +65,7 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: cfg.modelo_ia || "claude-opus-4-8",
+        model: cfg.modelo_ia || "claude-haiku-4-5",
         max_tokens: 700,
         system,
         messages: mensagens,

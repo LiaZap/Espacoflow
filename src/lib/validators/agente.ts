@@ -10,7 +10,7 @@ const horaOpcional = z
 export const configAgenteSchema = z.object({
   nome_espaco: z.string().trim().min(1, "Informe o nome do espaço"),
   nome_agente: z.string().trim().min(1, "Informe o nome do agente"),
-  modelo_ia: z.string().trim().min(1).default("claude-opus-4-8"),
+  modelo_ia: z.string().trim().min(1).default("claude-haiku-4-5"),
   hora_inicio: horaOpcional,
   hora_fim: horaOpcional,
   prompt_sistema: z.string().trim().optional(),

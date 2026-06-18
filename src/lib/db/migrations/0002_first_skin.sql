@@ -1,0 +1,1 @@
+ALTER TABLE "agente_config" ALTER COLUMN "modelo_ia" SET DEFAULT 'claude-haiku-4-5';
