@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Plus, CalendarRange } from "lucide-react";
+import { Plus, CalendarRange, UserCheck } from "lucide-react";
 import { listarReservas } from "@/lib/actions/reservas";
 import { exigirSessao } from "@/lib/auth";
 import { temPermissao } from "@/lib/auth/rbac";
@@ -30,6 +30,13 @@ export default async function ReservasPage() {
         descricao="Agenda de uso das salas. O sistema bloqueia sobreposição de horários."
         acao={
           <div className="flex gap-2">
+            {podeCheckin ? (
+              <Button asChild variant="outline">
+                <Link href="/reservas/presenca">
+                  <UserCheck className="h-4 w-4" /> Presença do dia
+                </Link>
+              </Button>
+            ) : null}
             <Button asChild variant="outline">
               <Link href="/reservas/ocupacao">
                 <CalendarRange className="h-4 w-4" /> Ocupação do dia

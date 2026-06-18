@@ -277,6 +277,7 @@ async function transicionarReserva(
     detalhes: `Check-in: ${rotulo}`,
   });
   revalidatePath("/reservas");
+  revalidatePath("/reservas/presenca");
   revalidatePath("/clientes");
   revalidatePath("/relatorios");
   return {};
@@ -288,6 +289,47 @@ export async function concluirReserva(id: string): Promise<{ erro?: string }> {
 
 export async function marcarNoShow(id: string): Promise<{ erro?: string }> {
   return transicionarReserva(id, "no_show", "não compareceu (no_show)");
+}
+
+/** Reservas de um dia para a tela de Presença (quem veio). */
+export async function reservasDoDia(data?: string) {
+  await exigirPermissao("reservas", "ler");
+  const dia = data && /^\d{4}-\d{2}-\d{2}$/.test(data)
+    ? data
+    : new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+
+  const lista = await db
+    .select({
+      id: reservas.id,
+      hora: reservas.hora,
+      duracao_min: reservas.duracao_min,
+      status: reservas.status_reserva,
+      sala: salas.nome,
+      cliente: clientes.nome,
+      telefone: clientes.telefone,
+    })
+    .from(reservas)
+    .innerJoin(salas, eq(reservas.sala_id, salas.id))
+    .innerJoin(clientes, eq(reservas.cliente_id, clientes.id))
+    .where(
+      and(
+        eq(reservas.is_deleted, false),
+        eq(reservas.data, dia),
+        notInArray(reservas.status_reserva, ["cancelada", "rascunho"])
+      )
+    )
+    .orderBy(asc(reservas.hora));
+
+  return {
+    dia,
+    reservas: lista,
+    resumo: {
+      total: lista.length,
+      compareceram: lista.filter((r) => r.status === "concluida").length,
+      faltaram: lista.filter((r) => r.status === "no_show").length,
+      pendentes: lista.filter((r) => r.status === "pendente" || r.status === "confirmada").length,
+    },
+  };
 }
 
 export type SalaDisponibilidade = {

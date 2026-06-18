@@ -49,8 +49,8 @@ const PERMISSOES: Record<string, Role[]> = {
   "reservas:criar": ["super_admin", "owner", "admin", "recepcao"],
   "reservas:ler": ["super_admin", "owner", "admin", "recepcao", "visualizador"],
   "reservas:atualizar": ["super_admin", "owner", "admin", "recepcao"],
-  // Check-in (presença/no-show) — quem fica no local: recepção. super_admin para suporte.
-  "reservas:checkin": ["super_admin", "recepcao"],
+  // Check-in (presença/no-show) — quem está no local marca quem veio (owner/recepção).
+  "reservas:checkin": ["super_admin", "owner", "admin", "recepcao"],
   "reservas:excluir": ["super_admin", "owner", "admin"],
   // Salas / recursos
   "salas:criar": ["super_admin", "owner", "admin"],
