@@ -19,6 +19,9 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 EXPOSE 3000
 
-# No start: aplica as migrações (idempotente) e sobe o servidor.
-# O worker da fila usa a MESMA imagem, com Start Command: npm run worker
-CMD ["sh", "-c", "npm run db:migrate && npm run start"]
+# No start, a env APP_ROLE decide o processo (MESMA imagem p/ app e worker):
+#   APP_ROLE=worker  -> processa a fila (BullMQ), sem migrar
+#   (qualquer outro) -> aplica migrações (idempotente) e sobe o site
+# Assim o worker no EasyPanel é só o mesmo repo/Dockerfile + env APP_ROLE=worker,
+# sem precisar sobrescrever comando nem usar subpasta de build.
+CMD ["sh", "-c", "if [ \"$APP_ROLE\" = \"worker\" ]; then npm run worker; else npm run db:migrate && npm run start; fi"]
