@@ -8,7 +8,8 @@ export const dynamic = "force-dynamic";
 
 function tokenValido(req: Request): boolean {
   const esperado = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
-  if (!esperado) return true; // dev sem token configurado → liberado
+  // Sem token configurado: liberado em dev, BLOQUEADO em produção (fail-closed).
+  if (!esperado) return process.env.NODE_ENV !== "production";
   const url = new URL(req.url);
   const recebido = req.headers.get("x-webhook-token") ?? url.searchParams.get("token");
   return recebido === esperado;

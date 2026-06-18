@@ -53,6 +53,12 @@ export async function criarReserva(_prev: FormState, formData: FormData): Promis
   const { inicio, fim } = calcularJanela(d.data, d.hora, d.duracao_min);
   const horas = minutosParaHoras(d.duracao_min);
 
+  // Janela de funcionamento (07h–23h).
+  const horaMin = Number(d.hora.slice(0, 2)) * 60 + Number(d.hora.slice(3, 5));
+  if (horaMin < ABRE_MIN || horaMin + d.duracao_min > ABRE_MIN + JORNADA_MIN) {
+    return { erro: "Horário fora do funcionamento (07h às 23h)." };
+  }
+
   try {
     const reserva = await db.transaction(async (tx) => {
       // 1) checagem de conflito (overlap) — o constraint GiST é o backstop final.
@@ -193,7 +199,7 @@ export async function cancelarReserva(id: string): Promise<{ erro?: string }> {
         const [cp] = await tx
           .select()
           .from(clientesPacotes)
-          .where(eq(clientesPacotes.id, r.pacote_cliente_id))
+          .where(and(eq(clientesPacotes.id, r.pacote_cliente_id), eq(clientesPacotes.is_deleted, false)))
           .for("update");
         if (cp) {
           const novoSaldo = Math.round((Number(cp.horas_saldo) + horasCredito) * 100) / 100;

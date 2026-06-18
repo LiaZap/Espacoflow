@@ -166,6 +166,10 @@ export async function uploadComprovante(_prev: FormState, formData: FormData): P
   const arquivo = formData.get("arquivo") as File | null;
   if (!id || !arquivo || arquivo.size === 0) return { erro: "Selecione um arquivo." };
   if (arquivo.size > 5 * 1024 * 1024) return { erro: "Arquivo acima de 5 MB." };
+  const TIPOS_OK = ["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"];
+  if (!TIPOS_OK.includes(arquivo.type)) {
+    return { erro: "Tipo não suportado. Use JPG, PNG, WEBP, GIF ou PDF." };
+  }
 
   const buffer = Buffer.from(await arquivo.arrayBuffer());
   const ext = (arquivo.name.split(".").pop() || "bin").toLowerCase();
