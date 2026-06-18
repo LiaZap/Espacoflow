@@ -9,6 +9,7 @@ import {
   date,
   jsonb,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { clientes } from "./clientes";
 import { salas } from "./salas";
@@ -97,7 +98,9 @@ export const whatsappMensagens = pgTable(
   },
   (t) => ({
     conversaIdx: index("idx_mensagens_conversa").on(t.conversa_id),
-    externoIdx: index("idx_mensagens_externo").on(t.id_externo),
+    // Único por id_externo (idempotência do webhook). NULLs são distintos no
+    // Postgres, então múltiplas mensagens sem id_externo continuam permitidas.
+    externoUnico: uniqueIndex("uq_mensagens_externo").on(t.id_externo),
   })
 );
 

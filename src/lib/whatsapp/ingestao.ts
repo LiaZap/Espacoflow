@@ -63,75 +63,93 @@ export type ResultadoIngestao =
   | { duplicada: true }
   | { duplicada: false; conversa: WhatsappConversa };
 
+/** Sentinela interna para abortar a transação quando a mensagem é duplicada. */
+class MensagemDuplicada extends Error {}
+
 /**
  * Persiste uma mensagem recebida: dedupe de cliente por telefone, conversa aberta
  * por cliente, e a mensagem com payload bruto. Idempotente por idExterno.
+ *
+ * A idempotência é ATÔMICA: cliente, conversa e mensagem entram numa única
+ * transação e a inserção da mensagem usa o índice único `uq_mensagens_externo`
+ * com ON CONFLICT DO NOTHING. Se o webhook reentregar a mesma mensagem (mesmo
+ * id_externo), o INSERT não grava nada e a transação inteira é revertida — sem
+ * incrementar não-lidas nem disparar a Hígia em duplicidade.
  */
 export async function ingerirMensagemRecebida(m: MensagemNormalizada): Promise<ResultadoIngestao> {
-  if (m.idExterno) {
-    const [existe] = await db
-      .select({ id: whatsappMensagens.id })
-      .from(whatsappMensagens)
-      .where(eq(whatsappMensagens.id_externo, m.idExterno));
-    if (existe) return { duplicada: true };
-  }
-
-  // cliente (dedupe por telefone)
-  let [cli] = await db
-    .select()
-    .from(clientes)
-    .where(and(eq(clientes.telefone, m.telefone), eq(clientes.is_deleted, false)));
-  if (!cli) {
-    [cli] = await db
-      .insert(clientes)
-      .values({
-        nome: m.nome ?? m.telefone,
-        telefone: m.telefone,
-        origem: "whatsapp",
-        status_lead: "novo",
-        ultima_atividade: new Date(),
-      })
-      .returning();
-  } else {
-    await db.update(clientes).set({ ultima_atividade: new Date() }).where(eq(clientes.id, cli.id));
-  }
-
-  // conversa aberta (uma por cliente)
-  let [conv] = await db
-    .select()
-    .from(whatsappConversas)
-    .where(and(eq(whatsappConversas.cliente_id, cli.id), eq(whatsappConversas.is_deleted, false)));
-  if (!conv) {
-    [conv] = await db
-      .insert(whatsappConversas)
-      .values({ cliente_id: cli.id, status: "higia", ultima_mensagem_em: new Date(), nao_lidas: 1 })
-      .returning();
-  } else {
-    await db
-      .update(whatsappConversas)
-      .set({ ultima_mensagem_em: new Date(), nao_lidas: conv.nao_lidas + 1 })
-      .where(eq(whatsappConversas.id, conv.id));
-  }
-
-  // Re-hospeda a mídia no MinIO (se houver e estiver acessível); senão mantém a URL original.
+  // Re-hospeda a mídia no MinIO FORA da transação (chamada de rede); senão mantém a URL original.
   let midiaFinal = m.midiaUrl ?? null;
   if (m.midiaUrl) {
     const persistida = await persistirMidia(m.midiaUrl, m.tipo);
     if (persistida) midiaFinal = persistida;
   }
 
-  await db.insert(whatsappMensagens).values({
-    conversa_id: conv.id,
-    origem: "user",
-    tipo: m.tipo,
-    conteudo: m.texto ?? null,
-    midia_url: midiaFinal,
-    midia_tipo: m.tipo !== "text" ? m.tipo : null,
-    status: "delivered",
-    enviada_em: new Date(),
-    id_externo: m.idExterno ?? null,
-    payload_bruto: m.payload,
-  });
+  let conv: WhatsappConversa;
+  try {
+    conv = await db.transaction(async (tx) => {
+      // cliente (dedupe por telefone)
+      let [cli] = await tx
+        .select()
+        .from(clientes)
+        .where(and(eq(clientes.telefone, m.telefone), eq(clientes.is_deleted, false)));
+      if (!cli) {
+        [cli] = await tx
+          .insert(clientes)
+          .values({
+            nome: m.nome ?? m.telefone,
+            telefone: m.telefone,
+            origem: "whatsapp",
+            status_lead: "novo",
+            ultima_atividade: new Date(),
+          })
+          .returning();
+      } else {
+        await tx.update(clientes).set({ ultima_atividade: new Date() }).where(eq(clientes.id, cli.id));
+      }
+
+      // conversa aberta (uma por cliente)
+      let [c] = await tx
+        .select()
+        .from(whatsappConversas)
+        .where(and(eq(whatsappConversas.cliente_id, cli.id), eq(whatsappConversas.is_deleted, false)));
+      if (!c) {
+        [c] = await tx
+          .insert(whatsappConversas)
+          .values({ cliente_id: cli.id, status: "higia", ultima_mensagem_em: new Date(), nao_lidas: 1 })
+          .returning();
+      } else {
+        await tx
+          .update(whatsappConversas)
+          .set({ ultima_mensagem_em: new Date(), nao_lidas: c.nao_lidas + 1 })
+          .where(eq(whatsappConversas.id, c.id));
+      }
+
+      // Mensagem com guarda atômica de duplicidade (índice único uq_mensagens_externo).
+      const inseridas = await tx
+        .insert(whatsappMensagens)
+        .values({
+          conversa_id: c.id,
+          origem: "user",
+          tipo: m.tipo,
+          conteudo: m.texto ?? null,
+          midia_url: midiaFinal,
+          midia_tipo: m.tipo !== "text" ? m.tipo : null,
+          status: "delivered",
+          enviada_em: new Date(),
+          id_externo: m.idExterno ?? null,
+          payload_bruto: m.payload,
+        })
+        .onConflictDoNothing({ target: whatsappMensagens.id_externo })
+        .returning({ id: whatsappMensagens.id });
+
+      // Conflito (mesma id_externo já existe) → reverte tudo e sinaliza duplicada.
+      if (m.idExterno && inseridas.length === 0) throw new MensagemDuplicada();
+      return c;
+    });
+  } catch (e) {
+    if (e instanceof MensagemDuplicada) return { duplicada: true };
+    throw e;
+  }
 
   // Arquiva o payload bruto também no Mongo (NoSQL flexível p/ a IA).
   await salvarPayloadBruto({

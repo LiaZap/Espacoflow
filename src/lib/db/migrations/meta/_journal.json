@@ -43,6 +43,13 @@
       "when": 1781824853791,
       "tag": "0005_many_leader",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781825840014,
+      "tag": "0006_reflective_kitty_pryde",
+      "breakpoints": true
     }
   ]
 }
