@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { DsarNovaForm } from "./_components/dsar-nova-form";
 import { DsarStatus } from "./_components/dsar-status";
+import { DsarAcoes } from "./_components/dsar-acoes";
 import { formatarDataHora } from "@/lib/utils";
 
 const TIPO_LABEL: Record<string, string> = Object.fromEntries(TIPOS_DSAR);
@@ -57,6 +58,7 @@ export default async function LgpdPage() {
                     <th className="py-2 font-medium">Prazo</th>
                     <th className="py-2 font-medium">Criado</th>
                     <th className="py-2 font-medium">Status</th>
+                    <th className="py-2 font-medium">Ações</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -70,6 +72,9 @@ export default async function LgpdPage() {
                       <td className="py-2 text-muted-foreground">{formatarDataHora(s.created_at)}</td>
                       <td className="py-2">
                         <DsarStatus id={s.id} status={s.status} />
+                      </td>
+                      <td className="py-2">
+                        <DsarAcoes id={s.id} tipo={s.tipo} nome={s.nome_solicitante} />
                       </td>
                     </tr>
                   ))}
