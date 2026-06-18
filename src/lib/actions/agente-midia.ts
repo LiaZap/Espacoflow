@@ -24,6 +24,52 @@ export async function listarMidia() {
     .orderBy(asc(agenteMidia.created_at));
 }
 
+/** Fotos das salas já incluídas no app (public/salas) — base inicial da galeria. */
+const FOTOS_SALAS = [
+  { nome: "Sala Privativa 01", tags: "sala-01", descricao: "Sala privativa para atendimento individual.", arquivo: "/salas/sala-01.jpg" },
+  { nome: "Sala Privativa 02", tags: "sala-02", descricao: "Sala privativa para reuniões e mentorias.", arquivo: "/salas/sala-02.jpg" },
+  { nome: "Sala Privativa 03", tags: "sala-03", descricao: "Sala privativa equipada para consultas.", arquivo: "/salas/sala-03.jpg" },
+  { nome: "Lounge / Convivência", tags: "lounge", descricao: "Espaço de convivência e espera.", arquivo: "/salas/lounge.jpg" },
+  { nome: "Ambiente do Espaço", tags: "ambiente", descricao: "Visão geral do coworking.", arquivo: "/salas/ambiente.jpg" },
+];
+
+/** Importa as fotos das salas que já vêm no app (1 clique, sem precisar do MinIO). */
+export async function importarFotosSalas(): Promise<MidiaFormState & { adicionadas?: number }> {
+  const sessao = await exigirPermissao("agente", "atualizar");
+
+  let adicionadas = 0;
+  for (const f of FOTOS_SALAS) {
+    const [ex] = await db
+      .select()
+      .from(agenteMidia)
+      .where(and(eq(agenteMidia.is_deleted, false), eq(agenteMidia.nome, f.nome)));
+    if (ex) continue;
+    await db.insert(agenteMidia).values({
+      nome: f.nome,
+      descricao: f.descricao,
+      tags: f.tags,
+      arquivo_url: f.arquivo,
+      tipo_arquivo: "image/jpeg",
+      nome_arquivo: f.arquivo.split("/").pop() ?? null,
+      modified_by: sessao.userId,
+    });
+    adicionadas += 1;
+  }
+
+  if (adicionadas > 0) {
+    await registrarAuditoria({
+      userId: sessao.userId,
+      acao: "atualizar",
+      entidade: "agente_midia",
+      detalhes: `Importou ${adicionadas} foto(s) das salas`,
+    });
+  }
+
+  revalidatePath("/agente");
+  revalidatePath("/midia");
+  return { ok: true, adicionadas };
+}
+
 /** Sobe uma nova mídia (foto/PDF) para o MinIO e cadastra na biblioteca. */
 export async function criarMidia(_prev: MidiaFormState, formData: FormData): Promise<MidiaFormState> {
   const sessao = await exigirPermissao("agente", "atualizar");

@@ -6,6 +6,7 @@ import {
   criarMidia,
   alternarMidia,
   excluirMidia,
+  importarFotosSalas,
   type MidiaFormState,
 } from "@/lib/actions/agente-midia";
 import type { AgenteMidia } from "@/lib/db/schema/agente";
@@ -65,8 +66,26 @@ export function MidiaManager({ midias }: { midias: AgenteMidia[] }) {
     });
   }
 
+  function importar() {
+    setErro(null);
+    startTransition(async () => {
+      const r = await importarFotosSalas();
+      if (r.erro) setErro(r.erro);
+    });
+  }
+
   return (
     <div className="space-y-6">
+      {/* Atalho: importa as fotos das salas que já vêm no app */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-dashed bg-muted/30 p-3">
+        <p className="text-sm text-muted-foreground">
+          Quer começar rápido? Importe as fotos das salas que já vêm com o sistema.
+        </p>
+        <Button type="button" variant="outline" size="sm" disabled={pendente} onClick={importar}>
+          {pendente ? "Importando…" : "Importar fotos das salas"}
+        </Button>
+      </div>
+
       {/* Upload */}
       <form ref={formRef} action={action} className="space-y-4 rounded-md border p-4">
         <div className="grid gap-4 sm:grid-cols-2">
