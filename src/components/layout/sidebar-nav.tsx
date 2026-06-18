@@ -10,6 +10,7 @@ import {
   Package,
   DoorOpen,
   Bot,
+  Images,
   BarChart3,
   Settings,
 } from "lucide-react";
@@ -24,6 +25,7 @@ const ICONES = {
   package: Package,
   door: DoorOpen,
   bot: Bot,
+  image: Images,
   chart: BarChart3,
   settings: Settings,
 } as const;

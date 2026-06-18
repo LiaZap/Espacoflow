@@ -69,6 +69,7 @@ export async function criarMidia(_prev: MidiaFormState, formData: FormData): Pro
   });
 
   revalidatePath("/agente");
+  revalidatePath("/midia");
   return { ok: true };
 }
 
@@ -91,6 +92,7 @@ export async function alternarMidia(id: string, ativo: boolean): Promise<MidiaFo
   });
 
   revalidatePath("/agente");
+  revalidatePath("/midia");
   return { ok: true };
 }
 
@@ -113,5 +115,6 @@ export async function excluirMidia(id: string): Promise<MidiaFormState> {
   });
 
   revalidatePath("/agente");
+  revalidatePath("/midia");
   return { ok: true };
 }

@@ -13,6 +13,7 @@ export const NAV_PRINCIPAL: ItemNav[] = [
   { href: "/pacotes", label: "Pacotes & Saldo", icon: "package" },
   { href: "/salas", label: "Salas", icon: "door" },
   { href: "/agente", label: "Agente Hígia", icon: "bot" },
+  { href: "/midia", label: "Fotos da Hígia", icon: "image" },
   { href: "/relatorios", label: "Relatórios", icon: "chart" },
   { href: "/configuracoes", label: "Configurações", icon: "settings" },
 ];
