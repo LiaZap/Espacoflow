@@ -84,6 +84,7 @@ export async function criarReserva(_prev: FormState, formData: FormData): Promis
           .for("update");
         if (!cp) throw new ReservaError("Pacote do cliente não encontrado.");
         if (cp.cliente_id !== d.cliente_id) throw new ReservaError("O pacote não pertence a este cliente.");
+        if (cp.status !== "ativo") throw new ReservaError("Este pacote ainda não está ativo (pagamento pendente).");
         const saldo = Number(cp.horas_saldo);
         if (saldo < horas) throw new ReservaError("Saldo de horas insuficiente neste pacote.");
         saldoApos = Math.round((saldo - horas) * 100) / 100;

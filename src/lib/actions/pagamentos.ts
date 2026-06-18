@@ -10,7 +10,10 @@ import { validarPagamentoSchema } from "@/lib/validators/pagamentos";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { uploadArquivo, minioConfigurado } from "@/lib/storage/minio";
 import { emitirRecibo } from "@/lib/documentos/recibo";
+import { clientesPacotes, clientesPacotesMovimentos } from "@/lib/db/schema/pacotes";
 import { exigirPermissao, primeiroErro } from "./_helpers";
+
+class PagamentoError extends Error {}
 
 /** Lista pagamentos com o nome do cliente. */
 export async function listarPagamentos() {
@@ -46,38 +49,85 @@ export async function validarPagamento(
 
   const sessao = await exigirPermissao("pagamentos", "validar");
 
-  await db.transaction(async (tx) => {
-    const [pg] = await tx
-      .select()
-      .from(pagamentos)
-      .where(and(eq(pagamentos.id, id), eq(pagamentos.is_deleted, false)))
-      .for("update");
-    if (!pg) throw new Error("Pagamento não encontrado.");
+  try {
+    await db.transaction(async (tx) => {
+      const [pg] = await tx
+        .select()
+        .from(pagamentos)
+        .where(and(eq(pagamentos.id, id), eq(pagamentos.is_deleted, false)))
+        .for("update");
+      if (!pg) throw new PagamentoError("Pagamento não encontrado.");
+      // Guarda de status: não re-confirmar nem recusar um pagamento já decidido.
+      if (pg.status === "confirmado" || pg.status === "recusado") {
+        throw new PagamentoError(`Este pagamento já foi ${pg.status}. Recarregue a página.`);
+      }
 
-    await tx
-      .update(pagamentos)
-      .set({
-        status,
-        validado_por: sessao.userId,
-        validado_em: new Date(),
-        pago_em: status === "confirmado" ? new Date() : null,
-        updated_at: new Date(),
-        modified_by: sessao.userId,
-      })
-      .where(eq(pagamentos.id, id));
-
-    if (pg.reserva_id) {
       await tx
-        .update(reservas)
+        .update(pagamentos)
         .set({
-          status_pagamento: status === "confirmado" ? "pago" : "pendente",
-          status_reserva: status === "confirmado" ? "confirmada" : "pendente",
+          status,
+          validado_por: sessao.userId,
+          validado_em: new Date(),
+          pago_em: status === "confirmado" ? new Date() : null,
           updated_at: new Date(),
           modified_by: sessao.userId,
         })
-        .where(eq(reservas.id, pg.reserva_id));
-    }
-  });
+        .where(eq(pagamentos.id, id));
+
+      // Pagamento de RESERVA: dirige o status da reserva.
+      if (pg.reserva_id) {
+        await tx
+          .update(reservas)
+          .set({
+            status_pagamento: status === "confirmado" ? "pago" : "pendente",
+            status_reserva: status === "confirmado" ? "confirmada" : "pendente",
+            updated_at: new Date(),
+            modified_by: sessao.userId,
+          })
+          .where(eq(reservas.id, pg.reserva_id));
+      }
+
+      // Pagamento de COMPRA DE PACOTE: confirma → ativa o saldo; recusa → cancela.
+      if (pg.cliente_pacote_id) {
+        const [cp] = await tx
+          .select()
+          .from(clientesPacotes)
+          .where(eq(clientesPacotes.id, pg.cliente_pacote_id))
+          .for("update");
+        if (cp) {
+          if (status === "confirmado") {
+            await tx
+              .update(clientesPacotes)
+              .set({ status: "ativo", updated_at: new Date(), modified_by: sessao.userId })
+              .where(eq(clientesPacotes.id, cp.id));
+          } else {
+            await tx
+              .update(clientesPacotes)
+              .set({
+                status: "cancelado",
+                horas_saldo: "0",
+                is_deleted: true,
+                deleted_at: new Date(),
+                updated_at: new Date(),
+                modified_by: sessao.userId,
+              })
+              .where(eq(clientesPacotes.id, cp.id));
+            await tx.insert(clientesPacotesMovimentos).values({
+              cliente_pacote_id: cp.id,
+              tipo: "ajuste",
+              horas: String(cp.horas_saldo),
+              saldo_apos: "0",
+              motivo: "Pagamento recusado — pacote cancelado",
+              modified_by: sessao.userId,
+            });
+          }
+        }
+      }
+    });
+  } catch (e: unknown) {
+    if (e instanceof PagamentoError) return { erro: e.message };
+    return { erro: "Não foi possível validar o pagamento." };
+  }
 
   await registrarAuditoria({
     userId: sessao.userId,
@@ -94,6 +144,7 @@ export async function validarPagamento(
   }
 
   revalidatePath("/pagamentos");
+  revalidatePath("/pacotes");
   return {};
 }
 

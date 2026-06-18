@@ -104,6 +104,13 @@ export async function venderPacote(_prev: FormState, formData: FormData): Promis
     .from(pacotes)
     .where(and(eq(pacotes.id, pacote_id), eq(pacotes.is_deleted, false)));
   if (!pacote) return { erro: "Pacote não encontrado." };
+  if (!pacote.ativo) return { erro: "Este pacote está inativo." };
+
+  const [cli] = await db
+    .select({ id: clientes.id })
+    .from(clientes)
+    .where(and(eq(clientes.id, cliente_id), eq(clientes.is_deleted, false)));
+  if (!cli) return { erro: "Cliente não encontrado." };
 
   const horas = String(pacote.horas_incluidas);
   const validoAte = new Date(Date.now() + pacote.validade_dias * 86_400_000)
@@ -120,7 +127,8 @@ export async function venderPacote(_prev: FormState, formData: FormData): Promis
         horas_consumidas: "0",
         horas_saldo: horas,
         valido_ate: validoAte,
-        status: "ativo",
+        // Saldo só fica utilizável após a confirmação do PIX (validarPagamento).
+        status: "pendente_pagamento",
         modified_by: sessao.userId,
       })
       .returning();
