@@ -7,6 +7,23 @@ const MIN_MS = 700;
 const MAX_MS = 6000;
 const PAUSA_ENTRE_MS = 600;
 
+/**
+ * Normaliza a saída da Hígia para ficar "humana" e válida no WhatsApp:
+ * - negrito markdown `**x**` → `*x*` (WhatsApp usa um asterisco só)
+ * - remove travessão (—/–) e hífen solto entre espaços (cara de IA) → vírgula
+ */
+export function limparTextoHigia(texto: string): string {
+  return texto
+    .replace(/\*{2,}/g, "*") // **negrito** → *negrito*
+    .replace(/_{2,}/g, "_")
+    .replace(/\s*[—–]\s*/g, ", ") // travessão / en-dash → vírgula
+    .replace(/ +- +/g, ", ") // " - " conector → vírgula
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/ +([,.;:!?])/g, "$1") // espaço antes de pontuação
+    .replace(/(^|\n)\s*[,.;:]\s*/g, "$1") // pontuação órfã no início de linha
+    .trim();
+}
+
 /** Quebra um texto em blocos curtos (parágrafos → sentenças), como um humano envia. */
 export function picarMensagem(texto: string, max = MAX_BLOCO): string[] {
   const blocos: string[] = [];

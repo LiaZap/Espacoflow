@@ -5,49 +5,85 @@ import { testarHigia, type TesteMsg } from "@/lib/actions/agente";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-type Bolha = { autor: "voce" | "higia"; blocos: string[] };
+type Bolha = { autor: "voce" | "higia"; texto: string };
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const jitter = (ms: number) => Math.round(ms * (0.85 + Math.random() * 0.3));
+
+/** Renderiza formatação do WhatsApp (*negrito* _itálico_ ~tachado~) de forma segura. */
+function formatarWhats(texto: string): string {
+  const esc = texto.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return esc
+    .replace(/\*(.+?)\*/g, "<strong>$1</strong>")
+    .replace(/_(.+?)_/g, "<em>$1</em>")
+    .replace(/~(.+?)~/g, "<del>$1</del>");
+}
+
+/** Monta o histórico p/ a API mesclando mensagens consecutivas do mesmo autor. */
+function construirHistorico(bolhas: Bolha[]): TesteMsg[] {
+  const out: TesteMsg[] = [];
+  for (const b of bolhas) {
+    const role: TesteMsg["role"] = b.autor === "voce" ? "user" : "assistant";
+    const ultimo = out[out.length - 1];
+    if (ultimo && ultimo.role === role) ultimo.content += "\n" + b.texto;
+    else out.push({ role, content: b.texto });
+  }
+  return out;
+}
 
 /**
  * Chat interno de teste da Hígia. Conversa direto com o agente (prompt/modelo/base
- * reais), sem WhatsApp e sem gravar nada — só para validar o atendimento.
+ * reais), sem WhatsApp e sem gravar nada. Simula o ritmo humano: "digitando…" + delay
+ * entre balões, igual ao envio real no WhatsApp.
  */
 export function ChatTeste({ nomeAgente, modelo }: { nomeAgente: string; modelo: string }) {
   const [historico, setHistorico] = useState<Bolha[]>([]);
   const [texto, setTexto] = useState("");
-  const [carregando, setCarregando] = useState(false);
+  const [ocupado, setOcupado] = useState(false);
+  const [digitando, setDigitando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const fimRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fimRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [historico, carregando]);
+  }, [historico, digitando]);
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
     const msg = texto.trim();
-    if (!msg || carregando) return;
+    if (!msg || ocupado) return;
 
     setErro(null);
     setTexto("");
-    const comUsuario: Bolha[] = [...historico, { autor: "voce", blocos: [msg] }];
+    const comUsuario: Bolha[] = [...historico, { autor: "voce", texto: msg }];
     setHistorico(comUsuario);
-    setCarregando(true);
-
-    const apiHist: TesteMsg[] = comUsuario.map((b) => ({
-      role: b.autor === "voce" ? "user" : "assistant",
-      content: b.blocos.join("\n"),
-    }));
+    setOcupado(true);
+    setDigitando(true);
 
     try {
-      const r = await testarHigia(apiHist);
-      if (r.erro) setErro(r.erro);
-      else if (r.blocos?.length) {
-        setHistorico((h) => [...h, { autor: "higia", blocos: r.blocos! }]);
+      const r = await testarHigia(construirHistorico(comUsuario));
+      if (r.erro || !r.blocos?.length) {
+        setDigitando(false);
+        setErro(r.erro ?? "A Hígia não respondeu.");
+        return;
+      }
+
+      // "Lendo" antes de começar a digitar.
+      await sleep(jitter(900));
+      for (let i = 0; i < r.blocos.length; i++) {
+        const bloco = r.blocos[i];
+        setDigitando(true);
+        const tempo = Math.min(4000, Math.max(600, (bloco.length / 16) * 1000));
+        await sleep(jitter(tempo));
+        setDigitando(false);
+        setHistorico((h) => [...h, { autor: "higia", texto: bloco }]);
+        if (i < r.blocos.length - 1) await sleep(jitter(450));
       }
     } catch (err) {
       setErro(String(err));
     } finally {
-      setCarregando(false);
+      setDigitando(false);
+      setOcupado(false);
     }
   }
 
@@ -62,6 +98,7 @@ export function ChatTeste({ nomeAgente, modelo }: { nomeAgente: string; modelo: 
             type="button"
             className="rounded px-2 py-0.5 hover:bg-muted hover:text-foreground"
             onClick={() => {
+              if (ocupado) return;
               setHistorico([]);
               setErro(null);
             }}
@@ -71,8 +108,8 @@ export function ChatTeste({ nomeAgente, modelo }: { nomeAgente: string; modelo: 
         ) : null}
       </div>
 
-      <div className="flex-1 space-y-3 overflow-auto p-4">
-        {historico.length === 0 && !carregando ? (
+      <div className="flex-1 space-y-2 overflow-auto p-4">
+        {historico.length === 0 && !digitando ? (
           <p className="mx-auto mt-8 max-w-sm text-center text-sm text-muted-foreground">
             Mande uma mensagem como se fosse um cliente no WhatsApp.
             <br />
@@ -80,29 +117,30 @@ export function ChatTeste({ nomeAgente, modelo }: { nomeAgente: string; modelo: 
           </p>
         ) : null}
 
-        {historico.map((b, i) => (
-          <div
-            key={i}
-            className={b.autor === "voce" ? "flex flex-col items-end gap-1" : "flex flex-col items-start gap-1"}
-          >
-            {b.blocos.map((bloco, j) => (
-              <div
-                key={j}
-                className={
-                  b.autor === "voce"
-                    ? "max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground"
-                    : "max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-bl-sm bg-muted px-3 py-2 text-sm"
-                }
-              >
-                {bloco}
+        {historico.map((b, i) =>
+          b.autor === "voce" ? (
+            <div key={i} className="flex justify-end">
+              <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
+                {b.texto}
               </div>
-            ))}
-          </div>
-        ))}
+            </div>
+          ) : (
+            <div key={i} className="flex justify-start">
+              <div
+                className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-bl-sm bg-muted px-3 py-2 text-sm [&_strong]:font-semibold"
+                dangerouslySetInnerHTML={{ __html: formatarWhats(b.texto) }}
+              />
+            </div>
+          )
+        )}
 
-        {carregando ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="animate-pulse">{nomeAgente} está digitando…</span>
+        {digitando ? (
+          <div className="flex justify-start">
+            <div className="flex items-center gap-1 rounded-2xl rounded-bl-sm bg-muted px-3 py-2.5">
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:-0.2s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:-0.1s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/40" />
+            </div>
           </div>
         ) : null}
 
@@ -120,10 +158,10 @@ export function ChatTeste({ nomeAgente, modelo }: { nomeAgente: string; modelo: 
           value={texto}
           onChange={(e) => setTexto(e.target.value)}
           placeholder="Escreva como um cliente…"
-          disabled={carregando}
+          disabled={ocupado}
           autoComplete="off"
         />
-        <Button type="submit" disabled={carregando || !texto.trim()}>
+        <Button type="submit" disabled={ocupado || !texto.trim()}>
           Enviar
         </Button>
       </form>

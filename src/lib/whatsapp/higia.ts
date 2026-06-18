@@ -6,7 +6,7 @@ import { clientes } from "@/lib/db/schema/clientes";
 import { montarPromptHigia } from "@/lib/agente/montar-prompt";
 import { registrarIaLog, lembrarMemoria } from "@/lib/mongo/client";
 import { getProvider } from "./provider";
-import { enviarHumanizado } from "./humanizar";
+import { enviarHumanizado, limparTextoHigia } from "./humanizar";
 
 export interface ResultadoHigia {
   enviada: boolean;
@@ -82,6 +82,7 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     return { enviada: false, motivo: String(e) };
   }
   if (!texto) return { enviada: false, motivo: "resposta vazia" };
+  texto = limparTextoHigia(texto);
 
   // Envio HUMANIZADO: "digitando…", mensagens picadas e delays. Cada bloco vira
   // uma mensagem no thread (como um humano que escreve em rajadas).

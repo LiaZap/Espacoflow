@@ -7,7 +7,7 @@ import { agenteConfig, agentePrecos, agenteBaseConhecimento } from "@/lib/db/sch
 import { configAgenteSchema } from "@/lib/validators/agente";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { montarPromptHigia } from "@/lib/agente/montar-prompt";
-import { picarMensagem } from "@/lib/whatsapp/humanizar";
+import { picarMensagem, limparTextoHigia } from "@/lib/whatsapp/humanizar";
 import { exigirPermissao, atualizarComLock, primeiroErro } from "./_helpers";
 
 export async function obterConfig() {
@@ -87,7 +87,7 @@ export async function testarHigia(mensagens: TesteMsg[]): Promise<TesteResultado
       .join("\n")
       .trim();
     if (!texto) return { erro: "A Hígia não respondeu (resposta vazia).", modelo };
-    return { blocos: picarMensagem(texto), modelo };
+    return { blocos: picarMensagem(limparTextoHigia(texto)), modelo };
   } catch (e) {
     return { erro: String(e), modelo };
   }
