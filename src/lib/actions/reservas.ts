@@ -248,7 +248,7 @@ async function transicionarReserva(
   novoStatus: "concluida" | "no_show",
   rotulo: string
 ): Promise<{ erro?: string }> {
-  const sessao = await exigirPermissao("reservas", "atualizar");
+  const sessao = await exigirPermissao("reservas", "checkin");
   try {
     await db.transaction(async (tx) => {
       const [rsv] = await tx

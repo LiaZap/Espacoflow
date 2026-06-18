@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { Plus, CalendarRange } from "lucide-react";
 import { listarReservas } from "@/lib/actions/reservas";
+import { exigirSessao } from "@/lib/auth";
+import { temPermissao } from "@/lib/auth/rbac";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +20,8 @@ const STATUS_VARIANTE: Record<string, "default" | "secondary" | "success" | "war
 };
 
 export default async function ReservasPage() {
-  const reservas = await listarReservas();
+  const [reservas, sessao] = await Promise.all([listarReservas(), exigirSessao()]);
+  const podeCheckin = temPermissao(sessao.role, "reservas", "checkin");
 
   return (
     <div className="space-y-6 p-8">
@@ -80,7 +83,7 @@ export default async function ReservasPage() {
                         <span className="text-xs text-muted-foreground">—</span>
                       ) : (
                         <>
-                          <CheckinBotoes id={r.id} status={r.status_reserva} />
+                          {podeCheckin ? <CheckinBotoes id={r.id} status={r.status_reserva} /> : null}
                           {r.status_reserva !== "concluida" ? (
                             <CancelarReservaBotao
                               id={r.id}
