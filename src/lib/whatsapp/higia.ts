@@ -5,6 +5,7 @@ import { agenteConfig } from "@/lib/db/schema/agente";
 import { clientes } from "@/lib/db/schema/clientes";
 import { montarPromptHigia } from "@/lib/agente/montar-prompt";
 import { registrarIaLog, lembrarMemoria } from "@/lib/mongo/client";
+import { registrarAuditoria } from "@/lib/audit/logger";
 import { getProvider } from "./provider";
 import { enviarHumanizado, limparTextoHigia } from "./humanizar";
 import { extrairMarcadores, resolverMidia, urlMidiaAbsoluta, tipoWhatsapp } from "./midia-marcadores";
@@ -85,6 +86,18 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
   }
   if (!texto) return { enviada: false, motivo: "resposta vazia" };
   texto = limparTextoHigia(texto);
+
+  // GUARDRAIL: a Hígia escala com [HUMANO] e NUNCA confirma pagamento/reserva.
+  let escalar = /\[\s*HUMANO\s*\]/iu.test(texto);
+  texto = texto.replace(/\[\s*HUMANO\s*\]/giu, "").trim();
+  let violou = false;
+  const RE_CONFIRMA =
+    /(pagamento|pix)\s+(foi\s+|est[áa]\s+)?(confirmad[oa]|aprovad[oa]|recebid[oa])|reserva\s+(foi\s+|est[áa]\s+)?(confirmad[oa]|garantid[oa])|est[áa]\s+(tudo\s+)?(pag[oa]|confirmad[oa])|confirmei\s+(o\s+|a\s+|seu\s+|sua\s+)?(pagamento|pix|reserva)/iu;
+  if (RE_CONFIRMA.test(texto)) {
+    violou = true;
+    escalar = true;
+    texto = "Boa! Deixa eu confirmar isso com a equipe pra te passar com segurança. Já te retorno por aqui 🙏";
+  }
 
   // A Hígia pode pedir fotos ([FOTO: id]) e o Pix ([PIX]). Separa os marcadores:
   // manda o texto LIMPO e depois envia Pix (texto) e fotos.
@@ -172,8 +185,20 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
 
   await db
     .update(whatsappConversas)
-    .set({ ultima_mensagem_em: new Date() })
+    .set({ ultima_mensagem_em: new Date(), ...(escalar ? { status: "humano" } : {}) })
     .where(eq(whatsappConversas.id, conversaId));
+
+  if (escalar) {
+    await registrarAuditoria({
+      acao: "atualizar",
+      entidade: "whatsapp_conversas",
+      registroId: conversaId,
+      severidade: violou ? "warn" : "info",
+      detalhes: violou
+        ? "Guardrail: a Hígia tentou confirmar pagamento/reserva — conversa escalada para humano."
+        : "A Hígia escalou a conversa para a equipe ([HUMANO]).",
+    }).catch(() => undefined);
+  }
 
   await registrarIaLog({
     conversaId,
