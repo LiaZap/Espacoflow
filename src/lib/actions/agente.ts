@@ -7,6 +7,7 @@ import { agenteConfig, agentePrecos, agenteBaseConhecimento } from "@/lib/db/sch
 import { configAgenteSchema } from "@/lib/validators/agente";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { montarPromptHigia } from "@/lib/agente/montar-prompt";
+import { picarMensagem } from "@/lib/whatsapp/humanizar";
 import { exigirPermissao, atualizarComLock, primeiroErro } from "./_helpers";
 
 export async function obterConfig() {
@@ -40,6 +41,56 @@ export async function listarBaseConhecimento() {
     .from(agenteBaseConhecimento)
     .where(eq(agenteBaseConhecimento.is_deleted, false))
     .orderBy(asc(agenteBaseConhecimento.prioridade));
+}
+
+export type TesteMsg = { role: "user" | "assistant"; content: string };
+export type TesteResultado = { blocos?: string[]; modelo?: string; erro?: string };
+
+/**
+ * Chat de teste da Hígia (playground). Usa o MESMO prompt/modelo/base reais,
+ * mas NÃO grava no banco nem envia pelo WhatsApp — é só para testar o atendimento.
+ */
+export async function testarHigia(mensagens: TesteMsg[]): Promise<TesteResultado> {
+  await exigirPermissao("agente", "ler");
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return { erro: "Defina ANTHROPIC_API_KEY no ambiente para testar a Hígia." };
+
+  const limpas = (mensagens ?? [])
+    .filter((m) => m?.content?.trim())
+    .map((m) => ({ role: m.role === "assistant" ? ("assistant" as const) : ("user" as const), content: m.content.trim() }));
+  if (limpas.length === 0) return { erro: "Envie uma mensagem." };
+
+  const [cfg] = await db
+    .select()
+    .from(agenteConfig)
+    .where(eq(agenteConfig.is_deleted, false))
+    .limit(1);
+  const modelo = cfg?.modelo_ia || "claude-haiku-4-5";
+  const system = await montarPromptHigia();
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({ model: modelo, max_tokens: 700, system, messages: limpas }),
+    });
+    if (!res.ok) return { erro: `Erro do modelo (HTTP ${res.status}).`, modelo };
+    const data = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
+    const texto = (data.content ?? [])
+      .filter((b) => b.type === "text" && b.text)
+      .map((b) => b.text as string)
+      .join("\n")
+      .trim();
+    if (!texto) return { erro: "A Hígia não respondeu (resposta vazia).", modelo };
+    return { blocos: picarMensagem(texto), modelo };
+  } catch (e) {
+    return { erro: String(e), modelo };
+  }
 }
 
 export type FormState = { erro?: string; ok?: boolean };

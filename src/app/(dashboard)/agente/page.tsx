@@ -5,6 +5,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { formatarBRL } from "@/lib/utils";
 import { AgenteConfigForm } from "./_components/agente-config-form";
+import { ChatTeste } from "./_components/chat-teste";
 
 export default async function AgentePage() {
   const config = await obterConfig();
@@ -32,12 +33,28 @@ export default async function AgentePage() {
         descricao="Persona, base de conhecimento e preços. O prompt é montado em runtime a partir das tabelas."
       />
 
-      <Tabs defaultValue="config">
+      <Tabs defaultValue="testar">
         <TabsList>
+          <TabsTrigger value="testar">Testar</TabsTrigger>
           <TabsTrigger value="config">Configuração</TabsTrigger>
           <TabsTrigger value="prompt">Prompt (preview)</TabsTrigger>
           <TabsTrigger value="conhecimento">Base & Preços</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="testar">
+          <Card>
+            <CardHeader>
+              <CardTitle>Testar a Hígia</CardTitle>
+              <CardDescription>
+                Converse com a Hígia aqui, sem precisar de WhatsApp nem do número do cliente. Usa o prompt,
+                o modelo e a base de conhecimento reais — não grava no banco nem envia mensagens.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ChatTeste nomeAgente={config.nome_agente} modelo={config.modelo_ia} />
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         <TabsContent value="config">
           <Card>
