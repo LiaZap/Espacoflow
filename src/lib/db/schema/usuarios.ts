@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, boolean, integer, index } from "drizzle-orm/pg-core";
 
 /**
  * Equipe interna do Espaço Flow que usa o backoffice.
@@ -15,6 +15,10 @@ export const usuarios = pgTable(
     role: text("role").notNull().default("recepcao"),
     telefone: text("telefone"),
     ultimo_acesso: timestamp("ultimo_acesso"),
+
+    // Anti-brute-force: contagem de falhas e bloqueio temporário da conta.
+    login_falhas: integer("login_falhas").notNull().default(0),
+    bloqueado_ate: timestamp("bloqueado_ate"),
 
     // --- auditoria OBRIGATÓRIA ---
     created_at: timestamp("created_at").notNull().defaultNow(),

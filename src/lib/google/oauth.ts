@@ -3,10 +3,20 @@
  * Credenciais do app via env: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET e
  * (opcional) GOOGLE_REDIRECT_URI. Escopo: calendar.events + email.
  */
+import { randomBytes } from "crypto";
+
 const SCOPE = "openid email https://www.googleapis.com/auth/calendar.events";
+
+/** Nome do cookie httpOnly que guarda o `state` anti-CSRF do fluxo OAuth. */
+export const OAUTH_STATE_COOKIE = "g_oauth_state";
 
 export function googleConfigurado(): boolean {
   return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+}
+
+/** Gera um token `state` aleatório (128 bits) para proteger o callback contra CSRF. */
+export function gerarState(): string {
+  return randomBytes(16).toString("hex");
 }
 
 export function redirectUri(): string {
@@ -16,7 +26,7 @@ export function redirectUri(): string {
 }
 
 /** URL de consentimento do Google (offline + consent → garante refresh_token). */
-export function urlConsentimento(): string {
+export function urlConsentimento(state: string): string {
   const p = new URLSearchParams({
     client_id: process.env.GOOGLE_CLIENT_ID ?? "",
     redirect_uri: redirectUri(),
@@ -25,6 +35,7 @@ export function urlConsentimento(): string {
     prompt: "consent",
     include_granted_scopes: "true",
     scope: SCOPE,
+    state,
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${p.toString()}`;
 }

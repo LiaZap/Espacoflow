@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { exigirSessao } from "@/lib/auth";
 import { temPermissao } from "@/lib/auth/rbac";
-import { googleConfigurado, urlConsentimento } from "@/lib/google/oauth";
+import { googleConfigurado, urlConsentimento, gerarState, OAUTH_STATE_COOKIE } from "@/lib/google/oauth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,5 +24,16 @@ export async function GET() {
   if (!googleConfigurado()) {
     return NextResponse.redirect(`${base()}/configuracoes/agenda?erro=sem_credenciais`);
   }
-  return NextResponse.redirect(urlConsentimento());
+
+  // CSRF: gera um `state` aleatório, guarda em cookie httpOnly e injeta na URL.
+  const state = gerarState();
+  const res = NextResponse.redirect(urlConsentimento(state));
+  res.cookies.set(OAUTH_STATE_COOKIE, state, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax", // o callback chega via navegação top-level do Google
+    path: "/api/google/oauth",
+    maxAge: 600, // 10 min
+  });
+  return res;
 }

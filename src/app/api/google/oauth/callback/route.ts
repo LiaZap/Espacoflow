@@ -4,7 +4,7 @@ import { exigirSessao } from "@/lib/auth";
 import { temPermissao } from "@/lib/auth/rbac";
 import { db } from "@/lib/db";
 import { googleAgendaConfig } from "@/lib/db/schema/integracoes";
-import { trocarCodigo } from "@/lib/google/oauth";
+import { trocarCodigo, OAUTH_STATE_COOKIE } from "@/lib/google/oauth";
 import { registrarAuditoria } from "@/lib/audit/logger";
 
 export const runtime = "nodejs";
@@ -30,6 +30,21 @@ export async function GET(req: Request) {
   const code = url.searchParams.get("code");
   if (url.searchParams.get("error") || !code) {
     return NextResponse.redirect(`${base()}/configuracoes/agenda?erro=oauth`);
+  }
+
+  // CSRF: o `state` do retorno tem que bater com o cookie httpOnly gravado no start.
+  const stateRecebido = url.searchParams.get("state");
+  const stateCookie = req.headers
+    .get("cookie")
+    ?.split(/;\s*/)
+    .find((c) => c.startsWith(`${OAUTH_STATE_COOKIE}=`))
+    ?.slice(OAUTH_STATE_COOKIE.length + 1);
+  const limparCookie = (resp: NextResponse) => {
+    resp.cookies.set(OAUTH_STATE_COOKIE, "", { path: "/api/google/oauth", maxAge: 0 });
+    return resp;
+  };
+  if (!stateRecebido || !stateCookie || stateRecebido !== stateCookie) {
+    return limparCookie(NextResponse.redirect(`${base()}/configuracoes/agenda?erro=state`));
   }
 
   try {
@@ -59,8 +74,8 @@ export async function GET(req: Request) {
       detalhes: `Conectou Google Agenda (${t.email ?? "conta"})`,
     });
 
-    return NextResponse.redirect(`${base()}/configuracoes/agenda?ok=conectado`);
+    return limparCookie(NextResponse.redirect(`${base()}/configuracoes/agenda?ok=conectado`));
   } catch {
-    return NextResponse.redirect(`${base()}/configuracoes/agenda?erro=token`);
+    return limparCookie(NextResponse.redirect(`${base()}/configuracoes/agenda?erro=token`));
   }
 }
