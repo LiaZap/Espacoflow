@@ -10,6 +10,7 @@ import { validarPagamentoSchema } from "@/lib/validators/pagamentos";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { uploadArquivo, minioConfigurado } from "@/lib/storage/minio";
 import { emitirRecibo } from "@/lib/documentos/recibo";
+import { lerComprovante } from "@/lib/documentos/ler-comprovante";
 import { clientesPacotes, clientesPacotesMovimentos } from "@/lib/db/schema/pacotes";
 import { exigirPermissao, primeiroErro } from "./_helpers";
 
@@ -27,6 +28,12 @@ export async function listarPagamentos() {
       reserva_id: pagamentos.reserva_id,
       cliente_pacote_id: pagamentos.cliente_pacote_id,
       comprovante_url: pagamentos.comprovante_url,
+      valor_lido: pagamentos.valor_lido,
+      pagador_lido: pagamentos.pagador_lido,
+      data_lida: pagamentos.data_lida,
+      leitura_obs: pagamentos.leitura_obs,
+      leitura_confere: pagamentos.leitura_confere,
+      leitura_em: pagamentos.leitura_em,
       created_at: pagamentos.created_at,
     })
     .from(pagamentos)
@@ -185,8 +192,85 @@ export async function uploadComprovante(_prev: FormState, formData: FormData): P
     registroId: id,
     detalhes: "Comprovante anexado",
   });
+
+  // Leitura automática por IA (best-effort) — assistiva, a equipe confirma.
+  await gravarLeitura(id, buffer.toString("base64"), arquivo.type || "application/octet-stream", sessao.userId).catch(
+    () => undefined
+  );
+
   revalidatePath("/pagamentos");
   return { ok: true };
+}
+
+/** Lê o comprovante por IA e grava o resultado no pagamento (com flag de "confere"). */
+async function gravarLeitura(
+  id: string,
+  base64: string,
+  mediaType: string,
+  userId?: string | null
+): Promise<boolean> {
+  const leitura = await lerComprovante(base64, mediaType);
+  if (!leitura) return false;
+
+  const [pg] = await db.select({ valor: pagamentos.valor }).from(pagamentos).where(eq(pagamentos.id, id));
+  const confere =
+    leitura.valor != null && pg?.valor != null && Math.abs(leitura.valor - Number(pg.valor)) < 0.01;
+
+  const obs = [
+    leitura.instituicao,
+    leitura.id_transacao ? `id ${leitura.id_transacao}` : null,
+    leitura.e_pix ? "Pix" : null,
+    leitura.confianca ? `confiança ${leitura.confianca}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  await db
+    .update(pagamentos)
+    .set({
+      valor_lido: leitura.valor != null ? String(leitura.valor) : null,
+      pagador_lido: leitura.pagador,
+      data_lida: leitura.data,
+      leitura_obs: obs || null,
+      leitura_confere: confere,
+      leitura_em: new Date(),
+      updated_at: new Date(),
+      modified_by: userId ?? null,
+    })
+    .where(eq(pagamentos.id, id));
+  return true;
+}
+
+/** (Re)lê o comprovante já anexado a um pagamento (botão "Ler comprovante"). */
+export async function lerComprovantePagamento(id: string): Promise<{ erro?: string; lido?: boolean }> {
+  const sessao = await exigirPermissao("pagamentos", "validar");
+
+  const [pg] = await db
+    .select({ comprovante_url: pagamentos.comprovante_url })
+    .from(pagamentos)
+    .where(and(eq(pagamentos.id, id), eq(pagamentos.is_deleted, false)));
+  if (!pg?.comprovante_url) return { erro: "Anexe um comprovante primeiro." };
+
+  try {
+    const res = await fetch(pg.comprovante_url);
+    if (!res.ok) return { erro: "Não consegui baixar o comprovante." };
+    const mediaType = res.headers.get("content-type")?.split(";")[0] || "application/octet-stream";
+    const base64 = Buffer.from(await res.arrayBuffer()).toString("base64");
+    const ok = await gravarLeitura(id, base64, mediaType, sessao.userId);
+    if (!ok) return { erro: "Não consegui ler o comprovante (sem ANTHROPIC_API_KEY ou ilegível)." };
+  } catch {
+    return { erro: "Falha ao ler o comprovante." };
+  }
+
+  await registrarAuditoria({
+    userId: sessao.userId,
+    acao: "atualizar",
+    entidade: "pagamentos",
+    registroId: id,
+    detalhes: "Leu o comprovante (IA)",
+  });
+  revalidatePath("/pagamentos");
+  return { lido: true };
 }
 
 /** Gera (ou re-gera) o recibo PDF de um pagamento e devolve a URL. */

@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { ValidarPixBotoes } from "./_components/validar-pix-botoes";
 import { ComprovanteUpload } from "./_components/comprovante-upload";
+import { LeituraComprovante } from "./_components/leitura-comprovante";
 import { ReciboBotao } from "./_components/recibo-botao";
 import { formatarBRL, formatarDataHora } from "@/lib/utils";
 
@@ -37,6 +38,7 @@ export default async function PagamentosPage() {
                 <th className="px-4 py-3 font-medium">Referente a</th>
                 <th className="px-4 py-3 font-medium">Valor</th>
                 <th className="px-4 py-3 font-medium">Comprovante</th>
+                <th className="px-4 py-3 font-medium">Leitura (IA)</th>
                 <th className="px-4 py-3 font-medium">Recebido</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 text-right font-medium">Ações</th>
@@ -54,6 +56,18 @@ export default async function PagamentosPage() {
                   </td>
                   <td className="px-4 py-3">
                     <ComprovanteUpload id={p.id} atual={p.comprovante_url} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <LeituraComprovante
+                      id={p.id}
+                      temComprovante={Boolean(p.comprovante_url)}
+                      valorLido={p.valor_lido != null ? Number(p.valor_lido) : null}
+                      pagador={p.pagador_lido}
+                      dataLida={p.data_lida}
+                      obs={p.leitura_obs}
+                      confere={p.leitura_confere}
+                      jaLido={Boolean(p.leitura_em)}
+                    />
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{formatarDataHora(p.created_at)}</td>
                   <td className="px-4 py-3">

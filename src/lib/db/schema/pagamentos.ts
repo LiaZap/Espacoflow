@@ -42,6 +42,14 @@ export const pagamentos = pgTable(
     validado_em: timestamp("validado_em"),
     id_externo: text("id_externo"),
 
+    // Leitura automática do comprovante (IA de visão) — ASSISTIVA: a equipe confirma.
+    valor_lido: numeric("valor_lido", { precision: 12, scale: 2 }),
+    pagador_lido: text("pagador_lido"),
+    data_lida: text("data_lida"),
+    leitura_obs: text("leitura_obs"),
+    leitura_confere: boolean("leitura_confere"),
+    leitura_em: timestamp("leitura_em"),
+
     created_at: timestamp("created_at").notNull().defaultNow(),
     updated_at: timestamp("updated_at").notNull().defaultNow(),
     deleted_at: timestamp("deleted_at"),
