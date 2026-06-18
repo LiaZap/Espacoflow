@@ -30,6 +30,19 @@ function ehImagem(tipo: string): boolean {
   return tipo?.startsWith("image/");
 }
 
+const IDENTIFICADORES_PADRAO = [
+  "sala-01",
+  "sala-02",
+  "sala-03",
+  "sala-04",
+  "lounge",
+  "ambiente",
+  "fachada",
+  "recepcao",
+  "tabela-precos",
+  "planos",
+];
+
 function Enviar() {
   const { pending } = useFormStatus();
   return (
@@ -74,6 +87,10 @@ export function MidiaManager({ midias }: { midias: AgenteMidia[] }) {
     });
   }
 
+  const sugestoes = Array.from(
+    new Set([...IDENTIFICADORES_PADRAO, ...midias.map((m) => ident(m.tags || m.nome))])
+  ).filter(Boolean);
+
   return (
     <div className="space-y-6">
       {/* Atalho: importa as fotos das salas que já vêm no app */}
@@ -95,7 +112,20 @@ export function MidiaManager({ midias }: { midias: AgenteMidia[] }) {
           </div>
           <div className="space-y-1.5">
             <Label>Identificador (para a IA)</Label>
-            <Input name="tags" placeholder="Ex: sala-01" />
+            <Input
+              name="tags"
+              list="sugestoes-identificador"
+              placeholder="Escolha um ou digite um novo"
+              autoComplete="off"
+            />
+            <datalist id="sugestoes-identificador">
+              {sugestoes.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+            <p className="text-xs text-muted-foreground">
+              Apelido que a IA usa para enviar este arquivo. Escolha da lista ou crie um novo.
+            </p>
           </div>
         </div>
         <div className="space-y-1.5">

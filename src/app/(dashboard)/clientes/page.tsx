@@ -45,6 +45,7 @@ export default async function ClientesPage() {
                 <th className="px-4 py-3 font-medium">Nome</th>
                 <th className="px-4 py-3 font-medium">Telefone</th>
                 <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium">Tags</th>
                 <th className="px-4 py-3 font-medium">Última atividade</th>
                 <th className="px-4 py-3 text-right font-medium">Ações</th>
               </tr>
@@ -56,6 +57,15 @@ export default async function ClientesPage() {
                   <td className="px-4 py-3 text-muted-foreground">{c.telefone}</td>
                   <td className="px-4 py-3">
                     <Badge variant={STATUS_VARIANTE[c.status_lead] ?? "secondary"}>{c.status_lead}</Badge>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {c.comprou ? <Badge variant="success">Comprou</Badge> : null}
+                      {c.compareceu ? <Badge variant="default">Compareceu</Badge> : null}
+                      {!c.comprou && !c.compareceu ? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      ) : null}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {c.ultima_atividade ? formatarDataHora(c.ultima_atividade) : "—"}

@@ -5,17 +5,50 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { clientes } from "@/lib/db/schema/clientes";
+import { reservas } from "@/lib/db/schema/reservas";
+import { clientesPacotes } from "@/lib/db/schema/pacotes";
 import { clienteSchema } from "@/lib/validators/clientes";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { exigirPermissao, atualizarComLock, primeiroErro } from "./_helpers";
 
-export async function listarClientes() {
+export type ClienteComTags = typeof clientes.$inferSelect & {
+  compareceu: boolean;
+  comprou: boolean;
+};
+
+export async function listarClientes(): Promise<ClienteComTags[]> {
   await exigirPermissao("clientes", "ler");
-  return db
+
+  const lista = await db
     .select()
     .from(clientes)
     .where(eq(clientes.is_deleted, false))
     .orderBy(desc(clientes.created_at));
+
+  // Tags derivadas: COMPARECEU (reserva concluída) e COMPROU (pacote ou reserva paga).
+  const [compareceram, pagaram, compraram] = await Promise.all([
+    db
+      .selectDistinct({ id: reservas.cliente_id })
+      .from(reservas)
+      .where(and(eq(reservas.is_deleted, false), eq(reservas.status_reserva, "concluida"))),
+    db
+      .selectDistinct({ id: reservas.cliente_id })
+      .from(reservas)
+      .where(and(eq(reservas.is_deleted, false), eq(reservas.status_pagamento, "pago"))),
+    db
+      .selectDistinct({ id: clientesPacotes.cliente_id })
+      .from(clientesPacotes)
+      .where(eq(clientesPacotes.is_deleted, false)),
+  ]);
+
+  const setCompareceu = new Set(compareceram.map((r) => r.id));
+  const setComprou = new Set<string>([...pagaram.map((r) => r.id), ...compraram.map((r) => r.id)]);
+
+  return lista.map((c) => ({
+    ...c,
+    compareceu: setCompareceu.has(c.id),
+    comprou: setComprou.has(c.id),
+  }));
 }
 
 export async function obterCliente(id: string) {
