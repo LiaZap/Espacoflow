@@ -58,6 +58,7 @@ export const reservas = pgTable(
     requer_validacao_humana: boolean("requer_validacao_humana").notNull().default(false),
     horas_debitadas: numeric("horas_debitadas", { precision: 6, scale: 2 }),
     notas_internas: text("notas_internas"),
+    google_event_id: text("google_event_id"), // id do evento no Google Calendar (sync)
 
     created_at: timestamp("created_at").notNull().defaultNow(),
     updated_at: timestamp("updated_at").notNull().defaultNow(),

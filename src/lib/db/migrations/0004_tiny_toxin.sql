@@ -1,0 +1,1 @@
+ALTER TABLE "reservas" ADD COLUMN "google_event_id" text;

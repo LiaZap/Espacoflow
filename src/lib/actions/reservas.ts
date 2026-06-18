@@ -11,6 +11,7 @@ import { clientesPacotes, clientesPacotesMovimentos, politicaCancelamento } from
 import { reservaSchema } from "@/lib/validators/reservas";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { calcularJanela, minutosParaHoras, ABRE_MIN, JORNADA_MIN } from "@/lib/reservas/disponibilidade";
+import { sincronizarReserva, removerEventoReserva } from "@/lib/google/calendar";
 import { exigirPermissao, primeiroErro } from "./_helpers";
 
 class ReservaError extends Error {}
@@ -146,6 +147,9 @@ export async function criarReserva(_prev: FormState, formData: FormData): Promis
       detalhes: `Reserva ${reserva.titulo} em ${d.data} ${d.hora} (${d.duracao_min}min)`,
       dadosNovos: reserva,
     });
+
+    // Sincroniza no Google Calendar (best-effort; só age se a agenda estiver conectada).
+    await sincronizarReserva(reserva.id).catch(() => undefined);
   } catch (e: unknown) {
     if (e instanceof ReservaError) return { erro: e.message };
     // 23P01 = exclusion_violation (constraint anti-overbooking)
@@ -231,6 +235,9 @@ export async function cancelarReserva(id: string): Promise<{ erro?: string }> {
     registroId: id,
     detalhes: "Cancelou reserva",
   });
+
+  // Remove o evento do Google Calendar (best-effort).
+  await removerEventoReserva(id).catch(() => undefined);
   revalidatePath("/reservas");
   return {};
 }
