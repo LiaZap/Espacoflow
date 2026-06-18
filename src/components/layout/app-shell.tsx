@@ -11,8 +11,8 @@ interface AppShellProps {
 
 export function AppShell({ session, children }: AppShellProps) {
   return (
-    <div className="grid min-h-screen grid-cols-1 md:grid-cols-[260px_1fr]">
-      <aside className="hidden flex-col border-r bg-sidebar md:flex">
+    <div className="grid min-h-screen grid-cols-1 md:grid-cols-[260px_1fr] print:block">
+      <aside className="hidden flex-col border-r bg-sidebar md:flex print:hidden">
         <div className="flex items-center gap-2 px-5 py-5">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary font-bold text-primary-foreground">
             F

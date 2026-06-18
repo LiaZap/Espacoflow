@@ -1,41 +1,61 @@
 "use server";
 
-import { and, asc, eq, gte } from "drizzle-orm";
+import { and, asc, eq, gte, lte } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { reservas } from "@/lib/db/schema/reservas";
 import { pagamentos } from "@/lib/db/schema/pagamentos";
 import { salas } from "@/lib/db/schema/salas";
+import { clientes } from "@/lib/db/schema/clientes";
 import { exigirPermissao } from "./_helpers";
 
 export type Serie = { label: string; valor: number };
 
-function ultimosDias(n: number): string[] {
-  const baseStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+function hojeISO(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+}
+function ehISO(s?: string): boolean {
+  return Boolean(s && /^\d{4}-\d{2}-\d{2}$/.test(s));
+}
+
+/** Normaliza o período: default = últimos 14 dias; ordena de/até. */
+function normalizarPeriodo(opts?: { de?: string; ate?: string }): { de: string; ate: string } {
+  const ate = ehISO(opts?.ate) ? (opts!.ate as string) : hojeISO();
+  let de = ehISO(opts?.de) ? (opts!.de as string) : "";
+  if (!de) {
+    const d = new Date(`${ate}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - 13);
+    de = d.toISOString().slice(0, 10);
+  }
+  if (de > ate) return { de: ate, ate: de };
+  return { de, ate };
+}
+
+function diasEntre(de: string, ate: string, max = 92): string[] {
   const dias: string[] = [];
-  for (let i = n - 1; i >= 0; i--) {
-    const d = new Date(`${baseStr}T00:00:00Z`);
-    d.setUTCDate(d.getUTCDate() - i);
+  let d = new Date(`${de}T00:00:00Z`);
+  const fim = new Date(`${ate}T00:00:00Z`);
+  while (d <= fim && dias.length < max) {
     dias.push(d.toISOString().slice(0, 10));
+    const proximo = new Date(d);
+    proximo.setUTCDate(proximo.getUTCDate() + 1);
+    d = proximo;
   }
   return dias;
 }
 
 const rotuloDia = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+const dataDePago = (ts: Date | null) => (ts ? new Date(ts).toISOString().slice(0, 10) : null);
 
-export async function dadosRelatorios() {
+export async function dadosRelatorios(opts?: { de?: string; ate?: string }) {
   await exigirPermissao("relatorios", "ler");
-  const dias = ultimosDias(14);
-  const inicio = dias[0];
+  const { de, ate } = normalizarPeriodo(opts);
+  const dias = diasEntre(de, ate);
 
-  const [rsv14, rsvAll, pgs, sls] = await Promise.all([
+  const [rsv, pgs, sls] = await Promise.all([
     db
-      .select({ data: reservas.data })
+      .select({ data: reservas.data, status: reservas.status_reserva, sala_id: reservas.sala_id })
       .from(reservas)
-      .where(and(eq(reservas.is_deleted, false), gte(reservas.data, inicio))),
-    db
-      .select({ status: reservas.status_reserva, sala_id: reservas.sala_id })
-      .from(reservas)
-      .where(eq(reservas.is_deleted, false)),
+      .where(and(eq(reservas.is_deleted, false), gte(reservas.data, de), lte(reservas.data, ate))),
     db
       .select({ pago_em: pagamentos.pago_em, valor: pagamentos.valor })
       .from(pagamentos)
@@ -47,14 +67,19 @@ export async function dadosRelatorios() {
       .orderBy(asc(salas.prioridade_alocacao)),
   ]);
 
+  const pgsPeriodo = pgs.filter((p) => {
+    const d = dataDePago(p.pago_em);
+    return d && d >= de && d <= ate;
+  });
+
   const reservasPorDia: Serie[] = dias.map((d) => ({
     label: rotuloDia(d),
-    valor: rsv14.filter((r) => r.data === d).length,
+    valor: rsv.filter((r) => r.data === d).length,
   }));
 
   const receitaPorDia: Serie[] = dias.map((d) => {
-    const total = pgs
-      .filter((p) => p.pago_em && new Date(p.pago_em).toISOString().slice(0, 10) === d)
+    const total = pgsPeriodo
+      .filter((p) => dataDePago(p.pago_em) === d)
       .reduce((a, p) => a + Number(p.valor ?? 0), 0);
     return { label: rotuloDia(d), valor: Math.round(total) };
   });
@@ -62,29 +87,104 @@ export async function dadosRelatorios() {
   const STATUS = ["pendente", "confirmada", "concluida", "cancelada", "no_show"];
   const porStatus: Serie[] = STATUS.map((s) => ({
     label: s,
-    valor: rsvAll.filter((r) => r.status === s).length,
+    valor: rsv.filter((r) => r.status === s).length,
   }));
 
   const porSala: Serie[] = sls.map((s) => ({
     label: s.nome,
-    valor: rsvAll.filter((r) => r.sala_id === s.id).length,
+    valor: rsv.filter((r) => r.sala_id === s.id).length,
   }));
 
-  const receitaTotal = pgs.reduce((a, p) => a + Number(p.valor ?? 0), 0);
-  const concl = rsvAll.filter((r) => r.status === "concluida").length;
-  const noshow = rsvAll.filter((r) => r.status === "no_show").length;
+  const receita = pgsPeriodo.reduce((a, p) => a + Number(p.valor ?? 0), 0);
+  const concl = rsv.filter((r) => r.status === "concluida").length;
+  const noshow = rsv.filter((r) => r.status === "no_show").length;
   const comparecimento = concl + noshow > 0 ? Math.round((concl / (concl + noshow)) * 100) : null;
 
   return {
+    periodo: { de, ate },
     reservasPorDia,
     receitaPorDia,
     porStatus,
     porSala,
     kpis: {
-      reservas14d: rsv14.length,
-      reservasTotal: rsvAll.length,
-      receitaTotalCentavos: Math.round(receitaTotal * 100),
+      reservasPeriodo: rsv.length,
+      receitaCentavos: Math.round(receita * 100),
       comparecimento,
+      concluidas: concl,
+    },
+  };
+}
+
+/** Lista enxuta de clientes (id + nome) para o seletor do relatório. */
+export async function clientesParaSelect() {
+  await exigirPermissao("relatorios", "ler");
+  return db
+    .select({ id: clientes.id, nome: clientes.nome })
+    .from(clientes)
+    .where(eq(clientes.is_deleted, false))
+    .orderBy(asc(clientes.nome));
+}
+
+/** Relatório de UM cliente no período: reservas, comparecimentos, faltas, valor pago. */
+export async function relatorioCliente(clienteId: string, opts?: { de?: string; ate?: string }) {
+  await exigirPermissao("relatorios", "ler");
+  if (!clienteId) return null;
+  const { de, ate } = normalizarPeriodo(opts);
+
+  const [cli] = await db
+    .select()
+    .from(clientes)
+    .where(and(eq(clientes.id, clienteId), eq(clientes.is_deleted, false)));
+  if (!cli) return null;
+
+  const lista = await db
+    .select({
+      data: reservas.data,
+      hora: reservas.hora,
+      titulo: reservas.titulo,
+      status: reservas.status_reserva,
+      status_pag: reservas.status_pagamento,
+      sala: salas.nome,
+    })
+    .from(reservas)
+    .innerJoin(salas, eq(reservas.sala_id, salas.id))
+    .where(
+      and(
+        eq(reservas.is_deleted, false),
+        eq(reservas.cliente_id, clienteId),
+        gte(reservas.data, de),
+        lte(reservas.data, ate)
+      )
+    )
+    .orderBy(asc(reservas.data), asc(reservas.hora));
+
+  const pgs = await db
+    .select({ valor: pagamentos.valor, pago_em: pagamentos.pago_em })
+    .from(pagamentos)
+    .where(
+      and(
+        eq(pagamentos.is_deleted, false),
+        eq(pagamentos.cliente_id, clienteId),
+        eq(pagamentos.status, "confirmado")
+      )
+    );
+  const valorPago = pgs
+    .filter((p) => {
+      const d = dataDePago(p.pago_em);
+      return d && d >= de && d <= ate;
+    })
+    .reduce((a, p) => a + Number(p.valor ?? 0), 0);
+
+  return {
+    cliente: { id: cli.id, nome: cli.nome, telefone: cli.telefone, status_lead: cli.status_lead },
+    periodo: { de, ate },
+    reservas: lista,
+    totais: {
+      reservas: lista.length,
+      comparecimentos: lista.filter((r) => r.status === "concluida").length,
+      faltas: lista.filter((r) => r.status === "no_show").length,
+      canceladas: lista.filter((r) => r.status === "cancelada").length,
+      valorPagoCentavos: Math.round(valorPago * 100),
     },
   };
 }
