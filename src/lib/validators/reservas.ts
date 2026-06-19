@@ -14,7 +14,12 @@ export const reservaSchema = z.object({
   tipo: z
     .enum(["tour", "uso_sala", "reuniao_comercial", "assinatura_contrato"])
     .default("uso_sala"),
-  pacote_cliente_id: z.string().uuid().optional(),
+  // O <select> sempre envia a chave; "Não usar saldo (Pix)" manda string vazia.
+  // Tratamos "" (e null) como ausência para não falhar a validação de uuid.
+  pacote_cliente_id: z.preprocess(
+    (v) => (v === "" || v == null ? undefined : v),
+    z.string().uuid().optional()
+  ),
   modalidade: z.string().trim().default("presencial"),
   notas_internas: z.string().trim().optional(),
 });

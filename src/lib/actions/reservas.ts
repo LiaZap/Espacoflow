@@ -10,7 +10,13 @@ import { clientes } from "@/lib/db/schema/clientes";
 import { clientesPacotes, clientesPacotesMovimentos, politicaCancelamento } from "@/lib/db/schema/pacotes";
 import { reservaSchema } from "@/lib/validators/reservas";
 import { registrarAuditoria } from "@/lib/audit/logger";
-import { calcularJanela, minutosParaHoras, ABRE_MIN, JORNADA_MIN } from "@/lib/reservas/disponibilidade";
+import {
+  calcularJanela,
+  minutosParaHoras,
+  hojeSaoPaulo,
+  ABRE_MIN,
+  JORNADA_MIN,
+} from "@/lib/reservas/disponibilidade";
 import { sincronizarReserva, removerEventoReserva } from "@/lib/google/calendar";
 import { exigirPermissao, primeiroErro } from "./_helpers";
 
@@ -91,6 +97,9 @@ export async function criarReserva(_prev: FormState, formData: FormData): Promis
         if (!cp) throw new ReservaError("Pacote do cliente não encontrado.");
         if (cp.cliente_id !== d.cliente_id) throw new ReservaError("O pacote não pertence a este cliente.");
         if (cp.status !== "ativo") throw new ReservaError("Este pacote ainda não está ativo (pagamento pendente).");
+        if (String(cp.valido_ate) < hojeSaoPaulo()) {
+          throw new ReservaError("Pacote vencido — o saldo não pode mais ser usado.");
+        }
         const saldo = Number(cp.horas_saldo);
         if (saldo < horas) throw new ReservaError("Saldo de horas insuficiente neste pacote.");
         saldoApos = Math.round((saldo - horas) * 100) / 100;
@@ -203,12 +212,17 @@ export async function cancelarReserva(id: string): Promise<{ erro?: string }> {
           .for("update");
         if (cp) {
           const novoSaldo = Math.round((Number(cp.horas_saldo) + horasCredito) * 100) / 100;
+          // Não reviver pacote cancelado nem vencido: credita o saldo mas mantém o
+          // estado que impede o uso (só volta a "ativo" se ainda estiver válido).
+          const vencido = String(cp.valido_ate) < hojeSaoPaulo();
+          const novoStatus =
+            cp.status === "cancelado" ? "cancelado" : vencido ? "expirado" : "ativo";
           await tx
             .update(clientesPacotes)
             .set({
               horas_saldo: String(novoSaldo),
               horas_consumidas: String(Math.max(0, Number(cp.horas_consumidas) - horasCredito)),
-              status: "ativo",
+              status: novoStatus,
               updated_at: new Date(),
               modified_by: sessao.userId,
             })

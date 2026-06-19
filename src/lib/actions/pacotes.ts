@@ -1,9 +1,10 @@
 "use server";
 
-import { and, asc, desc, eq, gt } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
+import { hojeSaoPaulo } from "@/lib/reservas/disponibilidade";
 import { pacotes, clientesPacotes, clientesPacotesMovimentos } from "@/lib/db/schema/pacotes";
 import { pagamentos } from "@/lib/db/schema/pagamentos";
 import { clientes } from "@/lib/db/schema/clientes";
@@ -35,7 +36,8 @@ export async function listarSaldosAtivos() {
       and(
         eq(clientesPacotes.is_deleted, false),
         eq(clientesPacotes.status, "ativo"),
-        gt(clientesPacotes.horas_saldo, "0")
+        gt(clientesPacotes.horas_saldo, "0"),
+        gte(clientesPacotes.valido_ate, hojeSaoPaulo())
       )
     )
     .orderBy(asc(clientes.nome));
