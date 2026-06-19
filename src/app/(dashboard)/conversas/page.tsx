@@ -4,6 +4,7 @@ import { listarConversas } from "@/lib/actions/conversas";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AutoRefresh } from "./_components/auto-refresh";
 import { formatarDataHora } from "@/lib/utils";
 
 const STATUS_VARIANTE: Record<string, "default" | "secondary" | "success" | "warning"> = {
@@ -17,6 +18,7 @@ export default async function ConversasPage() {
 
   return (
     <div className="space-y-6 p-8">
+      <AutoRefresh segundos={10} />
       <PageHeader
         titulo="Conversas (WhatsApp)"
         descricao="Inbox da Hígia. Clique numa conversa para abrir e responder."

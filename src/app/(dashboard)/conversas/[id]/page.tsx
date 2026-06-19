@@ -5,6 +5,7 @@ import { obterConversa } from "@/lib/actions/conversas";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConversaPainel } from "../_components/conversa-painel";
+import { AutoRefresh } from "../_components/auto-refresh";
 import { cn, formatarDataHora } from "@/lib/utils";
 
 const STATUS_VARIANTE: Record<string, "default" | "secondary" | "warning"> = {
@@ -27,6 +28,7 @@ export default async function ConversaThreadPage({ params }: { params: Promise<{
 
   return (
     <div className="space-y-4 p-8">
+      <AutoRefresh segundos={6} />
       <div className="flex items-center gap-3">
         <Button asChild variant="ghost" size="icon" aria-label="Voltar">
           <Link href="/conversas">
