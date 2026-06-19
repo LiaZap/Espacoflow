@@ -10,6 +10,7 @@ export const telefoneSchema = z
 export const emailOpcionalSchema = z
   .string()
   .trim()
+  .toLowerCase()
   .email("E-mail inválido")
   .optional()
   .or(z.literal("").transform(() => undefined));

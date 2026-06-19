@@ -1,8 +1,9 @@
 "use server";
 
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import { removerEventoReserva } from "@/lib/google/calendar";
 import { lgpdConfig, lgpdSolicitacoes, type LgpdSolicitacao } from "@/lib/db/schema/lgpd";
 import {
   clientes,
@@ -79,7 +80,8 @@ async function localizarTitular(sol: LgpdSolicitacao): Promise<Cliente | null> {
   const tel = (sol.telefone_solicitante ?? "").replace(/\D/g, "");
   const email = (sol.email_solicitante ?? "").toLowerCase().trim();
   const conds = [];
-  if (email) conds.push(eq(clientes.email, email));
+  // Comparação case-insensitive: e-mails antigos podem ter sido gravados com maiúsculas.
+  if (email) conds.push(sql`lower(${clientes.email}) = ${email}`);
   if (tel) conds.push(eq(clientes.telefone, tel));
   if (conds.length === 0) return null;
   const [c] = await db
@@ -223,6 +225,19 @@ export async function anonimizarTitular(id: string): Promise<{ erro?: string; ok
         .where(inArray(whatsappMensagens.conversa_id, convIds));
     }
 
+    // Pagamentos são RETIDOS (valor/status) por obrigação fiscal, mas os
+    // identificadores diretos do pagador (nome lido + imagem do comprovante) saem.
+    await tx
+      .update(pagamentos)
+      .set({
+        pagador_lido: null,
+        comprovante_url: null,
+        leitura_obs: null,
+        updated_at: new Date(),
+        modified_by: sessao.userId,
+      })
+      .where(eq(pagamentos.cliente_id, titular.id));
+
     await tx
       .update(lgpdSolicitacoes)
       .set({
@@ -236,6 +251,16 @@ export async function anonimizarTitular(id: string): Promise<{ erro?: string; ok
       })
       .where(eq(lgpdSolicitacoes.id, id));
   });
+
+  // Remove do Google Calendar os eventos que carregam nome/telefone do titular
+  // (description "Cliente: ... / Telefone: ..."). Best-effort — fora da transação.
+  const eventos = await db
+    .select({ id: reservas.id })
+    .from(reservas)
+    .where(and(eq(reservas.cliente_id, titular.id), isNotNull(reservas.google_event_id)));
+  for (const ev of eventos) {
+    await removerEventoReserva(ev.id).catch(() => undefined);
+  }
 
   await registrarAuditoria({
     userId: sessao.userId,
