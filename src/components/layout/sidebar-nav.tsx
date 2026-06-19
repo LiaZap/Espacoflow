@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NAV_PRINCIPAL } from "@/lib/nav";
+import { temPermissao, type Role } from "@/lib/auth/rbac";
 
 const ICONES = {
   dashboard: LayoutDashboard,
@@ -30,11 +31,12 @@ const ICONES = {
   settings: Settings,
 } as const;
 
-export function SidebarNav() {
+export function SidebarNav({ role }: { role: Role }) {
   const pathname = usePathname();
+  const itens = NAV_PRINCIPAL.filter((item) => !item.recurso || temPermissao(role, item.recurso, "ler"));
   return (
     <nav className="flex flex-col gap-1 px-3">
-      {NAV_PRINCIPAL.map((item) => {
+      {itens.map((item) => {
         const Icon = ICONES[item.icon as keyof typeof ICONES];
         const ativo = pathname === item.href || pathname.startsWith(`${item.href}/`);
         return (

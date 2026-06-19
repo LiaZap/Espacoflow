@@ -1,4 +1,6 @@
+import { redirect } from "next/navigation";
 import { Check } from "lucide-react";
+import { getSession } from "@/lib/auth";
 import { LoginForm } from "./_components/login-form";
 
 export const metadata = { title: "Entrar — Espaço Flow" };
@@ -9,7 +11,11 @@ const DESTAQUES = [
   "Pix, comprovantes e relatórios num só lugar",
 ];
 
-export default function LoginPage() {
+export default async function LoginPage() {
+  // Já autenticado de verdade (sessão válida no banco) → vai direto ao painel.
+  const session = await getSession();
+  if (session) redirect("/dashboard");
+
   return (
     <main className="grid min-h-screen lg:grid-cols-2">
       {/* Painel da marca (desktop) */}

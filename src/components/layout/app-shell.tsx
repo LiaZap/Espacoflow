@@ -24,7 +24,7 @@ export function AppShell({ session, children }: AppShellProps) {
         </div>
 
         <div className="flex-1 overflow-y-auto py-2">
-          <SidebarNav />
+          <SidebarNav role={session.role} />
         </div>
 
         <div className="border-t border-sidebar-border p-3">

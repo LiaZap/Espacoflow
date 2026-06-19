@@ -1,24 +1,30 @@
 import Link from "next/link";
 import { Bot, DoorOpen, Package, ShieldCheck, MessagesSquare, ScrollText, CalendarClock } from "lucide-react";
+import { getSession } from "@/lib/auth";
+import { temPermissao } from "@/lib/auth/rbac";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 
 const ITENS = [
-  { href: "/agente", icon: Bot, titulo: "Agente Hígia", desc: "Persona, prompt, preços e base de conhecimento." },
-  { href: "/salas", icon: DoorOpen, titulo: "Salas", desc: "Salas privativas e disponibilidade." },
-  { href: "/pacotes", icon: Package, titulo: "Pacotes", desc: "Catálogo de pacotes e planos." },
-  { href: "/painel-owner", icon: ShieldCheck, titulo: "Auditoria", desc: "Trilha de auditoria e registros excluídos." },
-  { href: "/configuracoes/agenda", icon: CalendarClock, titulo: "Google Agenda", desc: "Conectar a agenda do Google para sincronizar reservas." },
-  { href: "/configuracoes/lgpd", icon: ScrollText, titulo: "LGPD & DSAR", desc: "Governança de dados e solicitações de titulares." },
-  { href: "/conversas", icon: MessagesSquare, titulo: "WhatsApp", desc: "Inbox e integração de mensageria (em conexão)." },
+  { href: "/agente", icon: Bot, titulo: "Agente Hígia", desc: "Persona, prompt, preços e base de conhecimento.", recurso: "agente" },
+  { href: "/salas", icon: DoorOpen, titulo: "Salas", desc: "Salas privativas e disponibilidade.", recurso: "salas" },
+  { href: "/pacotes", icon: Package, titulo: "Pacotes", desc: "Catálogo de pacotes e planos.", recurso: "pacotes" },
+  { href: "/painel-owner", icon: ShieldCheck, titulo: "Auditoria", desc: "Trilha de auditoria e registros excluídos.", recurso: "painel_owner" },
+  { href: "/configuracoes/agenda", icon: CalendarClock, titulo: "Google Agenda", desc: "Conectar a agenda do Google para sincronizar reservas.", recurso: "configuracoes" },
+  { href: "/configuracoes/lgpd", icon: ScrollText, titulo: "LGPD & DSAR", desc: "Governança de dados e solicitações de titulares.", recurso: "configuracoes" },
+  { href: "/conversas", icon: MessagesSquare, titulo: "WhatsApp", desc: "Inbox e integração de mensageria (em conexão).", recurso: "conversas" },
 ];
 
-export default function ConfiguracoesPage() {
+export default async function ConfiguracoesPage() {
+  const session = await getSession();
+  const itens = session
+    ? ITENS.filter((i) => temPermissao(session.role, i.recurso, "ler"))
+    : [];
   return (
     <div className="space-y-6 p-8">
       <PageHeader titulo="Configurações" descricao="Ajustes do Espaço Flow." />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {ITENS.map((i) => {
+        {itens.map((i) => {
           const Icon = i.icon;
           return (
             <Link key={i.href} href={i.href}>

@@ -20,13 +20,13 @@ export function middleware(req: NextRequest) {
   const temSessao = req.cookies.has("flow_session");
   const ehLogin = ROTAS_LOGIN.some((r) => pathname.startsWith(r));
 
-  // Páginas de login: usuário já logado vai direto ao painel.
-  if (ehLogin) {
-    if (temSessao) return NextResponse.redirect(new URL("/dashboard", req.url));
-    return NextResponse.next();
-  }
+  // Páginas de login: sempre deixa renderizar. NÃO redirecionamos para /dashboard
+  // só pela presença do cookie — um cookie órfão (sessão expirada/usuário deletado)
+  // criaria loop /login -> /dashboard -> /login. A própria página de login valida a
+  // sessão no banco e redireciona quem está REALMENTE autenticado.
+  if (ehLogin) return NextResponse.next();
 
-  // Demais rotas exigem sessão.
+  // Demais rotas exigem ao menos o cookie (validação real no server/getSession).
   if (!temSessao) return NextResponse.redirect(new URL("/login", req.url));
   return NextResponse.next();
 }
