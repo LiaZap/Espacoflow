@@ -43,11 +43,21 @@ async function accessTokenValido(c: GoogleAgendaConfig): Promise<string | null> 
       }),
     });
     if (!res.ok) return null;
-    const t = (await res.json()) as { access_token: string; expires_in?: number };
+    const t = (await res.json()) as {
+      access_token: string;
+      expires_in?: number;
+      refresh_token?: string;
+    };
     const expira = new Date(Date.now() + (t.expires_in ?? 3600) * 1000);
     await db
       .update(googleAgendaConfig)
-      .set({ access_token: t.access_token, token_expira_em: expira, updated_at: new Date() })
+      .set({
+        access_token: t.access_token,
+        token_expira_em: expira,
+        // O Google pode rotacionar o refresh_token; se vier um novo, persiste.
+        ...(t.refresh_token ? { refresh_token: t.refresh_token } : {}),
+        updated_at: new Date(),
+      })
       .where(eq(googleAgendaConfig.id, c.id));
     return t.access_token;
   } catch {

@@ -35,7 +35,7 @@ export function ComprovanteUpload({ id, atual }: { id: string; atual: string | n
         <input
           type="file"
           name="arquivo"
-          accept="image/*,application/pdf"
+          accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
           className="hidden"
           onChange={() => formRef.current?.requestSubmit()}
         />

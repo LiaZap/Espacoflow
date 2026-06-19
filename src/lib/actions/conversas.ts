@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { whatsappConversas, whatsappMensagens } from "@/lib/db/schema/whatsapp";
 import { clientes } from "@/lib/db/schema/clientes";
 import { registrarAuditoria } from "@/lib/audit/logger";
+import { temPermissao } from "@/lib/auth/rbac";
 import { getProvider } from "@/lib/whatsapp/provider";
 import { ingerirMensagemRecebida } from "@/lib/whatsapp/ingestao";
 import { despacharRespostaHigia } from "@/lib/fila/dispatch";
@@ -29,21 +30,25 @@ export async function listarConversas() {
 }
 
 export async function obterConversa(id: string) {
-  await exigirPermissao("conversas", "ler");
+  const sessao = await exigirPermissao("conversas", "ler");
   const [conversa] = await db
     .select()
     .from(whatsappConversas)
     .where(and(eq(whatsappConversas.id, id), eq(whatsappConversas.is_deleted, false)));
   if (!conversa) return null;
 
-  const [cliente] = await db.select().from(clientes).where(eq(clientes.id, conversa.cliente_id));
+  const [cliente] = await db
+    .select()
+    .from(clientes)
+    .where(and(eq(clientes.id, conversa.cliente_id), eq(clientes.is_deleted, false)));
   const mensagens = await db
     .select()
     .from(whatsappMensagens)
     .where(and(eq(whatsappMensagens.conversa_id, id), eq(whatsappMensagens.is_deleted, false)))
     .orderBy(asc(whatsappMensagens.created_at));
 
-  if (conversa.nao_lidas > 0) {
+  // Marcar como lida é uma escrita: só quem pode atualizar conversas (não o visualizador).
+  if (conversa.nao_lidas > 0 && temPermissao(sessao.role, "conversas", "atualizar")) {
     await db.update(whatsappConversas).set({ nao_lidas: 0 }).where(eq(whatsappConversas.id, id));
   }
 
@@ -62,7 +67,10 @@ export async function enviarMensagemManual(conversaId: string, texto: string): P
     .where(and(eq(whatsappConversas.id, conversaId), eq(whatsappConversas.is_deleted, false)));
   if (!conv) return { erro: "Conversa não encontrada." };
 
-  const [cli] = await db.select().from(clientes).where(eq(clientes.id, conv.cliente_id));
+  const [cli] = await db
+    .select()
+    .from(clientes)
+    .where(and(eq(clientes.id, conv.cliente_id), eq(clientes.is_deleted, false)));
   const envio = await getProvider().enviarTexto(cli?.telefone ?? "", t);
 
   await db.insert(whatsappMensagens).values({

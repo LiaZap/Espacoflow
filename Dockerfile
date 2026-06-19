@@ -21,7 +21,8 @@ EXPOSE 3000
 
 # No start, a env APP_ROLE decide o processo (MESMA imagem p/ app e worker):
 #   APP_ROLE=worker  -> processa a fila (BullMQ), sem migrar
-#   (qualquer outro) -> aplica migrações (idempotente) e sobe o site
-# Assim o worker no EasyPanel é só o mesmo repo/Dockerfile + env APP_ROLE=worker,
-# sem precisar sobrescrever comando nem usar subpasta de build.
-CMD ["sh", "-c", "if [ \"$APP_ROLE\" = \"worker\" ]; then npm run worker; else npm run db:migrate && npm run start; fi"]
+#   (qualquer outro) -> tenta migrar (com retry p/ Postgres ainda subindo) e sobe o site
+# A migração NÃO usa "&&": se ela falhar (DB não-pronto no boot, etc.) o site sobe
+# mesmo assim, em vez de entrar em crash-loop sem nenhuma página para testar.
+# Assim o worker no EasyPanel é só o mesmo repo/Dockerfile + env APP_ROLE=worker.
+CMD ["sh", "-c", "if [ \"$APP_ROLE\" = \"worker\" ]; then npm run worker; else for i in 1 2 3 4 5 6 7 8 9 10; do npm run db:migrate && break || (echo \"[migrate] tentativa $i falhou, aguardando DB...\"; sleep 3); done; npm run start; fi"]

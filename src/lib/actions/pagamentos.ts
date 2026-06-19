@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { pagamentos } from "@/lib/db/schema/pagamentos";
@@ -184,6 +184,8 @@ export async function uploadComprovante(_prev: FormState, formData: FormData): P
     .set({
       comprovante_url: url,
       comprovante_recebido: true,
+      // Reflete o estado "recebi, está em análise" (só sai de pendente).
+      status: sql`case when ${pagamentos.status} = 'pendente' then 'em_analise' else ${pagamentos.status} end`,
       updated_at: new Date(),
       modified_by: sessao.userId,
     })

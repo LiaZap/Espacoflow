@@ -29,5 +29,12 @@ export async function despacharRespostaHigia(conversaId: string, chave?: string)
     })
     .onConflictDoNothing();
 
-  await getFilaHigia().add("responder", { conversaId, chave: idempotency }, { jobId: idempotency });
+  try {
+    await getFilaHigia().add("responder", { conversaId, chave: idempotency }, { jobId: idempotency });
+  } catch (e) {
+    // Redis indisponível: não devolve 500 ao provedor (evita reentrega em loop).
+    // Degrada para processamento inline — a Hígia ainda responde.
+    console.error("[higia] fila indisponível, processando inline:", e);
+    void gerarRespostaHigia(conversaId).catch((err) => console.error("[higia inline]", err));
+  }
 }

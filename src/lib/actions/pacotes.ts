@@ -119,40 +119,44 @@ export async function venderPacote(_prev: FormState, formData: FormData): Promis
     .toISOString()
     .slice(0, 10);
 
-  await db.transaction(async (tx) => {
-    const [cp] = await tx
-      .insert(clientesPacotes)
-      .values({
-        cliente_id,
-        pacote_id,
-        horas_total: horas,
-        horas_consumidas: "0",
-        horas_saldo: horas,
-        valido_ate: validoAte,
-        // Saldo só fica utilizável após a confirmação do PIX (validarPagamento).
-        status: "pendente_pagamento",
+  try {
+    await db.transaction(async (tx) => {
+      const [cp] = await tx
+        .insert(clientesPacotes)
+        .values({
+          cliente_id,
+          pacote_id,
+          horas_total: horas,
+          horas_consumidas: "0",
+          horas_saldo: horas,
+          valido_ate: validoAte,
+          // Saldo só fica utilizável após a confirmação do PIX (validarPagamento).
+          status: "pendente_pagamento",
+          modified_by: sessao.userId,
+        })
+        .returning();
+
+      await tx.insert(clientesPacotesMovimentos).values({
+        cliente_pacote_id: cp.id,
+        tipo: "compra",
+        horas,
+        saldo_apos: horas,
+        motivo: `Compra do pacote ${pacote.nome}`,
         modified_by: sessao.userId,
-      })
-      .returning();
+      });
 
-    await tx.insert(clientesPacotesMovimentos).values({
-      cliente_pacote_id: cp.id,
-      tipo: "compra",
-      horas,
-      saldo_apos: horas,
-      motivo: `Compra do pacote ${pacote.nome}`,
-      modified_by: sessao.userId,
+      await tx.insert(pagamentos).values({
+        cliente_id,
+        cliente_pacote_id: cp.id,
+        valor: String(pacote.preco),
+        status: "pendente",
+        provedor: "pix_manual",
+        modified_by: sessao.userId,
+      });
     });
-
-    await tx.insert(pagamentos).values({
-      cliente_id,
-      cliente_pacote_id: cp.id,
-      valor: String(pacote.preco),
-      status: "pendente",
-      provedor: "pix_manual",
-      modified_by: sessao.userId,
-    });
-  });
+  } catch {
+    return { erro: "Não foi possível vender o pacote. Tente novamente." };
+  }
 
   await registrarAuditoria({
     userId: sessao.userId,
