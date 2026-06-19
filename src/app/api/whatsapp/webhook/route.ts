@@ -59,6 +59,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
+  // Só mensagens novas viram conversa. Eventos como messages.update (ACK de
+  // leitura/entrega), send.message e presence trazem data.key e, sem este filtro,
+  // virariam "mensagem" fantasma (conteúdo null) e acionariam a Hígia à toa.
+  if (evento && evento !== "messages.upsert") {
+    return NextResponse.json({ ok: true, ignorado: evento });
+  }
+
   const normalizada = normalizarEvolution(payload);
   if (!normalizada) return NextResponse.json({ ok: true, ignorado: true });
 

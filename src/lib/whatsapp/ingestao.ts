@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { clientes } from "@/lib/db/schema/clientes";
 import {
@@ -87,11 +87,13 @@ export async function ingerirMensagemRecebida(m: MensagemNormalizada): Promise<R
   let conv: WhatsappConversa;
   try {
     conv = await db.transaction(async (tx) => {
-      // cliente (dedupe por telefone)
-      let [cli] = await tx
-        .select()
-        .from(clientes)
-        .where(and(eq(clientes.telefone, m.telefone), eq(clientes.is_deleted, false)));
+      // Serializa por telefone: evita corrida (2 entregas simultâneas) criando
+      // cliente/conversa em duplicidade ou violando o UNIQUE(telefone).
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${m.telefone}))`);
+
+      // cliente por telefone (telefone é UNIQUE; busca inclui soft-deletado para
+      // não violar a constraint — uma mensagem nova reativa um lead excluído).
+      let [cli] = await tx.select().from(clientes).where(eq(clientes.telefone, m.telefone));
       if (!cli) {
         [cli] = await tx
           .insert(clientes)
@@ -104,7 +106,10 @@ export async function ingerirMensagemRecebida(m: MensagemNormalizada): Promise<R
           })
           .returning();
       } else {
-        await tx.update(clientes).set({ ultima_atividade: new Date() }).where(eq(clientes.id, cli.id));
+        await tx
+          .update(clientes)
+          .set({ ultima_atividade: new Date(), is_deleted: false, deleted_at: null })
+          .where(eq(clientes.id, cli.id));
       }
 
       // conversa aberta (uma por cliente)
