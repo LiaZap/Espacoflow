@@ -7,8 +7,9 @@ import { gerarRespostaHigia } from "@/lib/whatsapp/higia";
 import { db } from "@/lib/db";
 import { jobsFila } from "@/lib/db/schema/jobs";
 
-// Motivos de "não enviada" que NÃO são erro (não devem disparar retry).
-const NAO_ERRO = /humano|desativada|conversa sob|sem conteúdo|não encontrada|vazia|key/i;
+// Motivos de "não enviada" que NÃO são erro (não devem disparar retry/DLQ).
+const NAO_ERRO =
+  /humano|desativada|conversa sob|sem conteúdo|não encontrada|vazia|key|respondida|definitivo|escalado|nada a enviar/i;
 
 async function marcar(chave: string | undefined, status: string, tentativas: number, erro?: string) {
   if (!chave) return;

@@ -49,6 +49,15 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     .where(and(eq(whatsappMensagens.conversa_id, conversaId), eq(whatsappMensagens.is_deleted, false)))
     .orderBy(asc(whatsappMensagens.created_at));
 
+  // Coalescing anti-"double-texting": se a última mensagem da conversa já NÃO é
+  // do cliente (a Hígia ou um humano já respondeu depois), não há nada novo a
+  // responder. Em rajada (oi / tudo bem / quero reservar), só o job que vê a
+  // última mensagem ainda sem resposta gera UMA resposta sobre todo o histórico.
+  const ultima = historico[historico.length - 1];
+  if (ultima && ultima.origem !== "user") {
+    return { enviada: false, motivo: "conversa já respondida (sem mensagem nova)" };
+  }
+
   const mensagens = historico
     .filter((h) => h.conteudo)
     .map((h) => ({
@@ -56,6 +65,18 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
       content: h.conteudo as string,
     }));
   if (mensagens.length === 0) return { enviada: false, motivo: "sem conteúdo" };
+
+  // A API da Anthropic exige papéis ALTERNADOS começando em 'user'. No WhatsApp o
+  // cliente manda várias mensagens seguidas → vários 'user' consecutivos → HTTP 400.
+  // Colapsa mensagens consecutivas do mesmo papel e descarta 'assistant' iniciais.
+  const mensagensApi: Array<{ role: "user" | "assistant"; content: string }> = [];
+  for (const m of mensagens) {
+    if (mensagensApi.length === 0 && m.role !== "user") continue;
+    const anterior = mensagensApi[mensagensApi.length - 1];
+    if (anterior && anterior.role === m.role) anterior.content += "\n" + m.content;
+    else mensagensApi.push({ role: m.role, content: m.content });
+  }
+  if (mensagensApi.length === 0) return { enviada: false, motivo: "sem conteúdo" };
 
   const system = await montarPromptHigia({ clienteId: conv.cliente_id });
   let texto = "";
@@ -71,10 +92,14 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
         model: cfg.modelo_ia || "claude-haiku-4-5",
         max_tokens: 700,
         system,
-        messages: mensagens,
+        messages: mensagensApi,
       }),
     });
-    if (!res.ok) return { enviada: false, motivo: `LLM HTTP ${res.status}` };
+    // 4xx é erro de requisição (não adianta retry → não vai para a DLQ). 5xx/429 retenta.
+    if (!res.ok) {
+      const retentavel = res.status >= 500 || res.status === 429;
+      return { enviada: false, motivo: `LLM HTTP ${res.status}${retentavel ? "" : " (definitivo)"}` };
+    }
     const data = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
     texto = (data.content ?? [])
       .filter((b) => b.type === "text" && b.text)
@@ -91,8 +116,17 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
   let escalar = /\[\s*HUMANO\s*\]/iu.test(texto);
   texto = texto.replace(/\[\s*HUMANO\s*\]/giu, "").trim();
   let violou = false;
-  const RE_CONFIRMA =
-    /(pagamento|pix)\s+(foi\s+|est[áa]\s+)?(confirmad[oa]|aprovad[oa]|recebid[oa])|reserva\s+(foi\s+|est[áa]\s+)?(confirmad[oa]|garantid[oa])|est[áa]\s+(tudo\s+)?(pag[oa]|confirmad[oa])|confirmei\s+(o\s+|a\s+|seu\s+|sua\s+)?(pagamento|pix|reserva)/iu;
+  // Segunda linha de defesa pós-LLM (recall priorizado: falso-positivo só escala).
+  // Cobre substantivo+verbo, verbo+substantivo, confirmações curtas e coloquiais.
+  const RE_CONFIRMA = new RegExp(
+    [
+      "(pagamento|pix|comprovante|reserva)\\s+(foi\\s+|est[áa]\\s+|já\\s+)?(confirmad|aprovad|recebid|garantid|pag[oa])",
+      "\\b(recebi|confirmei|aprovei|validei)\\b[^.!?\\n]{0,25}\\b(pix|pagamento|comprovante|reserva|valor)\\b",
+      "(^|[\\n.!?]\\s*)(confirmad[oa]|aprovad[oa])\\s*[!.]",
+      "\\b(t[áa]|est[áa])\\s+(tudo\\s+)?(pag[oa]|confirmad[oa])\\b",
+    ].join("|"),
+    "iu"
+  );
   if (RE_CONFIRMA.test(texto)) {
     violou = true;
     escalar = true;
@@ -156,7 +190,18 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
   // Fotos/arquivos pedidos pela Hígia (resolvidos na biblioteca agente_midia).
   for (const token of tokens) {
     const m = await resolverMidia(token);
-    if (!m) continue;
+    if (!m) {
+      // Identificador de mídia que não casa nada na biblioteca: registra para o
+      // operador diagnosticar (a Hígia "prometeu" foto que não existe).
+      await registrarAuditoria({
+        acao: "atualizar",
+        entidade: "whatsapp_conversas",
+        registroId: conversaId,
+        severidade: "warn",
+        detalhes: `Hígia pediu mídia inexistente: "${token}" (foto não enviada).`,
+      }).catch(() => undefined);
+      continue;
+    }
     const tipo = tipoWhatsapp(m.tipo_arquivo);
     const url = urlMidiaAbsoluta(m.arquivo_url);
     const legenda = m.descricao || m.nome;
@@ -218,5 +263,12 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     ultima_resposta: texto.slice(0, 500),
   }).catch(() => undefined);
 
-  return { enviada: algumOk, motivo: algumOk ? undefined : "falha no envio" };
+  // Nada enviado pode ser legítimo (escalou só com [HUMANO], ou pediu [PIX] sem
+  // chave configurada) — não é falha de envio e não deve disparar retry/DLQ.
+  const motivo = algumOk
+    ? undefined
+    : escalar
+      ? "escalado para humano (sem texto a enviar)"
+      : "nada a enviar (resposta só com marcadores?)";
+  return { enviada: algumOk, motivo };
 }
