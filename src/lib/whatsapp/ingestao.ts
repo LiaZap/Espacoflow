@@ -17,6 +17,8 @@ export interface MensagemNormalizada {
   idExterno?: string;
   midiaUrl?: string;
   payload: unknown;
+  /** true = enviada PELO número conectado (humano no celular ou nosso próprio envio). */
+  fromMe?: boolean;
 }
 
 type PayloadQualquer = Record<string, unknown> & {
@@ -27,11 +29,14 @@ type PayloadQualquer = Record<string, unknown> & {
 export function normalizarEvolution(payload: PayloadQualquer): MensagemNormalizada | null {
   const data = (payload?.data ?? payload) as Record<string, unknown>;
   const key = data?.key as { remoteJid?: string; id?: string; fromMe?: boolean } | undefined;
-  if (!key || key.fromMe) return null; // ignora o que nós mesmos enviamos
+  if (!key) return null;
+  // remoteJid é sempre a OUTRA ponta (o cliente), mesmo quando fromMe=true.
   const telefone = String(key.remoteJid ?? "").replace(/@.*/, "").replace(/\D/g, "");
-  if (!telefone) return null;
+  if (!telefone) return null; // descarta status@broadcast e afins (vira string vazia)
 
-  const nome = data?.pushName ? String(data.pushName) : undefined;
+  const fromMe = !!key.fromMe;
+  // pushName em fromMe é o nome de QUEM enviou (o número do espaço), não o cliente.
+  const nome = !fromMe && data?.pushName ? String(data.pushName) : undefined;
   const msg = (data?.message ?? {}) as Record<string, any>;
   let texto: string | undefined;
   let tipo = "text";
@@ -56,7 +61,7 @@ export function normalizarEvolution(payload: PayloadQualquer): MensagemNormaliza
     midiaUrl = msg.videoMessage.url ?? msg.videoMessage.mediaUrl;
   }
 
-  return { telefone, nome, texto, tipo, midiaUrl, idExterno: key.id, payload };
+  return { telefone, nome, texto, tipo, midiaUrl, idExterno: key.id, payload, fromMe };
 }
 
 export type ResultadoIngestao =
@@ -112,7 +117,7 @@ export async function ingerirMensagemRecebida(m: MensagemNormalizada): Promise<R
           .where(eq(clientes.id, cli.id));
       }
 
-      // conversa aberta (uma por cliente)
+      // conversa aberta (uma por cliente) — cria com nao_lidas 0; ajusta abaixo.
       let [c] = await tx
         .select()
         .from(whatsappConversas)
@@ -120,26 +125,22 @@ export async function ingerirMensagemRecebida(m: MensagemNormalizada): Promise<R
       if (!c) {
         [c] = await tx
           .insert(whatsappConversas)
-          .values({ cliente_id: cli.id, status: "higia", ultima_mensagem_em: new Date(), nao_lidas: 1 })
+          .values({ cliente_id: cli.id, status: "higia", ultima_mensagem_em: new Date(), nao_lidas: 0 })
           .returning();
-      } else {
-        await tx
-          .update(whatsappConversas)
-          .set({ ultima_mensagem_em: new Date(), nao_lidas: c.nao_lidas + 1 })
-          .where(eq(whatsappConversas.id, c.id));
       }
 
       // Mensagem com guarda atômica de duplicidade (índice único uq_mensagens_externo).
+      // fromMe = enviada pelo número do espaço (humano no celular OU eco do nosso envio).
       const inseridas = await tx
         .insert(whatsappMensagens)
         .values({
           conversa_id: c.id,
-          origem: "user",
+          origem: m.fromMe ? "humano" : "user",
           tipo: m.tipo,
           conteudo: m.texto ?? null,
           midia_url: midiaFinal,
           midia_tipo: m.tipo !== "text" ? m.tipo : null,
-          status: "delivered",
+          status: m.fromMe ? "sent" : "delivered",
           enviada_em: new Date(),
           id_externo: m.idExterno ?? null,
           payload_bruto: m.payload,
@@ -147,8 +148,22 @@ export async function ingerirMensagemRecebida(m: MensagemNormalizada): Promise<R
         .onConflictDoNothing({ target: whatsappMensagens.id_externo })
         .returning({ id: whatsappMensagens.id });
 
-      // Conflito (mesma id_externo já existe) → reverte tudo e sinaliza duplicada.
+      // Conflito (mesma id_externo já existe — ex.: eco do que NÓS enviamos) → reverte
+      // tudo e sinaliza duplicada. Assim o nosso próprio envio não vira "novo humano".
       if (m.idExterno && inseridas.length === 0) throw new MensagemDuplicada();
+
+      if (m.fromMe) {
+        // Humano respondeu (pelo celular ou painel) → assume a conversa: Hígia pausa.
+        await tx
+          .update(whatsappConversas)
+          .set({ status: "humano", ultima_mensagem_em: new Date(), updated_at: new Date() })
+          .where(eq(whatsappConversas.id, c.id));
+      } else {
+        await tx
+          .update(whatsappConversas)
+          .set({ ultima_mensagem_em: new Date(), nao_lidas: c.nao_lidas + 1 })
+          .where(eq(whatsappConversas.id, c.id));
+      }
       return c;
     });
   } catch (e) {

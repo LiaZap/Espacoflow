@@ -72,6 +72,10 @@ export async function POST(req: Request) {
   const r = await ingerirMensagemRecebida(normalizada);
   if (r.duplicada) return NextResponse.json({ ok: true, duplicada: true });
 
+  // fromMe = saída (humano respondeu pelo celular/painel) → registrada e a conversa
+  // já foi assumida; a Hígia NÃO responde a uma mensagem que partiu do espaço.
+  if (normalizada.fromMe) return NextResponse.json({ ok: true, saida: true });
+
   // Enfileira (ou processa inline) a resposta da Hígia, idempotente por id_externo.
   const chave = normalizada.idExterno ? `higia-${normalizada.idExterno}` : undefined;
   await despacharRespostaHigia(r.conversa.id, chave);
