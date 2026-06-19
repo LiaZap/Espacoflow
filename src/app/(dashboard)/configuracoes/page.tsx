@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { Bot, DoorOpen, Package, ShieldCheck, MessagesSquare, ScrollText, CalendarClock } from "lucide-react";
+import { Bot, DoorOpen, Package, ShieldCheck, MessagesSquare, ScrollText, CalendarClock, UsersRound } from "lucide-react";
 import { getSession } from "@/lib/auth";
 import { temPermissao } from "@/lib/auth/rbac";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 
 const ITENS = [
+  { href: "/configuracoes/usuarios", icon: UsersRound, titulo: "Usuários", desc: "Equipe interna, papéis e acessos (RBAC).", recurso: "usuarios" },
   { href: "/agente", icon: Bot, titulo: "Agente Hígia", desc: "Persona, prompt, preços e base de conhecimento.", recurso: "agente" },
   { href: "/salas", icon: DoorOpen, titulo: "Salas", desc: "Salas privativas e disponibilidade.", recurso: "salas" },
   { href: "/pacotes", icon: Package, titulo: "Pacotes", desc: "Catálogo de pacotes e planos.", recurso: "pacotes" },
