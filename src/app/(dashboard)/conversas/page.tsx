@@ -2,16 +2,9 @@ import Link from "next/link";
 import { MessagesSquare, Settings2 } from "lucide-react";
 import { listarConversas } from "@/lib/actions/conversas";
 import { PageHeader } from "@/components/page-header";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AutoRefresh } from "./_components/auto-refresh";
-import { formatarDataHora } from "@/lib/utils";
-
-const STATUS_VARIANTE: Record<string, "default" | "secondary" | "success" | "warning"> = {
-  higia: "default",
-  humano: "warning",
-  pausado: "secondary",
-};
+import { ConversaLinha } from "./_components/conversa-linha";
 
 export default async function ConversasPage() {
   const conversas = await listarConversas();
@@ -21,7 +14,7 @@ export default async function ConversasPage() {
       <AutoRefresh segundos={10} />
       <PageHeader
         titulo="Conversas (WhatsApp)"
-        descricao="Inbox da Hígia. Clique numa conversa para abrir e responder."
+        descricao="Inbox da Hígia. Clique na linha para abrir a conversa. Em atendimento humano, use 'Devolver à Hígia' para a IA reassumir."
         acao={
           <Button asChild variant="outline">
             <Link href="/configuracoes/whatsapp">
@@ -46,25 +39,12 @@ export default async function ConversasPage() {
                 <th className="px-4 py-3 font-medium">Atendimento</th>
                 <th className="px-4 py-3 font-medium">Não lidas</th>
                 <th className="px-4 py-3 font-medium">Última mensagem</th>
+                <th className="px-4 py-3 text-right font-medium">Ações</th>
               </tr>
             </thead>
             <tbody>
               {conversas.map((c) => (
-                <tr key={c.id} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="px-4 py-3 font-medium">
-                    <Link href={`/conversas/${c.id}`} className="text-primary hover:underline">
-                      {c.cliente_nome}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">{c.telefone}</td>
-                  <td className="px-4 py-3">
-                    <Badge variant={STATUS_VARIANTE[c.status] ?? "secondary"}>{c.status}</Badge>
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">{c.nao_lidas}</td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {c.ultima_mensagem_em ? formatarDataHora(c.ultima_mensagem_em) : "—"}
-                  </td>
-                </tr>
+                <ConversaLinha key={c.id} c={c} />
               ))}
             </tbody>
           </table>
