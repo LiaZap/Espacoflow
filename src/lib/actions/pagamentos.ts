@@ -10,6 +10,7 @@ import { validarPagamentoSchema } from "@/lib/validators/pagamentos";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { uploadArquivo, minioConfigurado } from "@/lib/storage/minio";
 import { emitirRecibo } from "@/lib/documentos/recibo";
+import { sincronizarReserva } from "@/lib/google/calendar";
 import { lerComprovante } from "@/lib/documentos/ler-comprovante";
 import { clientesPacotes, clientesPacotesMovimentos } from "@/lib/db/schema/pacotes";
 import { exigirPermissao, primeiroErro } from "./_helpers";
@@ -55,6 +56,8 @@ export async function validarPagamento(
   if (!parsed.success) return { erro: primeiroErro(parsed.error.issues) };
 
   const sessao = await exigirPermissao("pagamentos", "validar");
+  // Reserva a ser sincronizada no Google só APÓS confirmar (agenda = só confirmadas).
+  let reservaParaSincronizar: string | null = null;
 
   try {
     await db.transaction(async (tx) => {
@@ -92,6 +95,7 @@ export async function validarPagamento(
             modified_by: sessao.userId,
           })
           .where(eq(reservas.id, pg.reserva_id));
+        if (status === "confirmado") reservaParaSincronizar = pg.reserva_id;
       }
 
       // Pagamento de COMPRA DE PACOTE: confirma → ativa o saldo; recusa → cancela.
@@ -149,8 +153,13 @@ export async function validarPagamento(
   if (status === "confirmado") {
     await emitirRecibo(id, sessao.userId).catch(() => undefined);
   }
+  // Reserva confirmada → agora SIM cria o evento no Google Calendar (best-effort).
+  if (reservaParaSincronizar) {
+    await sincronizarReserva(reservaParaSincronizar).catch(() => undefined);
+  }
 
   revalidatePath("/pagamentos");
+  revalidatePath("/reservas");
   revalidatePath("/pacotes");
   return {};
 }

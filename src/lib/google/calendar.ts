@@ -85,6 +85,9 @@ export async function sincronizarReserva(reservaId: string): Promise<void> {
       await removerEventoReserva(reservaId);
       return;
     }
+    // Só reservas CONFIRMADAS/pagas entram na agenda. Provisórias (pendentes de Pix)
+    // não viram evento até a equipe validar o pagamento.
+    if (r.status_reserva !== "confirmada" && r.status_reserva !== "concluida") return;
 
     const [sala] = await db.select({ nome: salas.nome }).from(salas).where(eq(salas.id, r.sala_id));
     const [cli] = await db
