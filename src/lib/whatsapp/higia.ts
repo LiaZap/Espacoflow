@@ -11,6 +11,7 @@ import { enviarHumanizado, limparTextoHigia } from "./humanizar";
 import { extrairMarcadores, resolverMidia, urlMidiaAbsoluta, tipoWhatsapp } from "./midia-marcadores";
 import { extrairPix, montarMensagensPix } from "./pix";
 import { FERRAMENTAS_AGENDA, executarFerramentaAgenda } from "@/lib/agente/ferramentas";
+import { processarComprovanteHigia } from "./comprovante-higia";
 
 export interface ResultadoHigia {
   enviada: boolean;
@@ -57,6 +58,20 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
   const ultima = historico[historico.length - 1];
   if (ultima && ultima.origem !== "user") {
     return { enviada: false, motivo: "conversa já respondida (sem mensagem nova)" };
+  }
+
+  // Comprovante de Pix: se o cliente mandou uma imagem e há reserva aguardando
+  // pagamento, a Hígia LÊ e valida em código — confirma sozinha só se bater 100%
+  // (Pix, valor exato, favorecido = conta do espaço, recente, não reutilizado);
+  // qualquer divergência escala para a equipe. Não passa pelo LLM.
+  if (cfg.reserva_via_ia && ultima?.tipo === "image" && ultima.midia_url && cli?.telefone) {
+    const r = await processarComprovanteHigia({
+      conversaId,
+      clienteId: conv.cliente_id,
+      telefone: cli.telefone,
+      midiaUrl: ultima.midia_url,
+    });
+    if (r.tratou) return { enviada: true, motivo: r.confirmada ? "pagamento confirmado (IA)" : "comprovante escalado" };
   }
 
   const mensagens = historico

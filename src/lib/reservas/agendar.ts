@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { reservas } from "@/lib/db/schema/reservas";
 import { salas } from "@/lib/db/schema/salas";
 import { clientes } from "@/lib/db/schema/clientes";
+import { pagamentos } from "@/lib/db/schema/pagamentos";
 import { sincronizarReserva } from "@/lib/google/calendar";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { calcularJanela, ABRE_MIN, JORNADA_MIN } from "./disponibilidade";
@@ -93,8 +94,9 @@ export async function agendarReservaAgente(input: {
   duracaoMin: number;
   finalidade?: string;
   salaId?: string;
+  valor?: number;
 }): Promise<AgendamentoOk | { erro: string }> {
-  const { clienteId, data, hora, duracaoMin, finalidade } = input;
+  const { clienteId, data, hora, duracaoMin, finalidade, valor } = input;
   const invalido = janelaSanitizada(data, hora, duracaoMin);
   if (invalido) return { erro: invalido };
 
@@ -199,6 +201,17 @@ export async function agendarReservaAgente(input: {
           modalidade: "presencial",
         })
         .returning();
+
+      // Registro de pagamento pendente (Pix manual) — é contra ele que o comprovante
+      // enviado pelo cliente será lido/validado. valor = preço combinado pela Hígia.
+      await tx.insert(pagamentos).values({
+        cliente_id: clienteId,
+        reserva_id: nova.id,
+        valor: valor != null && Number.isFinite(valor) ? String(valor) : null,
+        status: "pendente",
+        provedor: "pix_manual",
+      });
+
       return { id: nova.id, salaNome: escolhida.nome, reaproveitado: false };
     });
 

@@ -33,6 +33,11 @@ export const FERRAMENTAS_AGENDA = [
           type: "string",
           description: "Para que o cliente vai usar a sala (ex.: atendimento, reunião, mentoria)",
         },
+        valor: {
+          type: "number",
+          description:
+            "Valor TOTAL combinado da reserva, em reais (conforme a tabela de preços). Usado para validar o comprovante de Pix do cliente.",
+        },
       },
       required: ["data", "hora", "duracao_min"],
     },
@@ -74,6 +79,7 @@ export async function executarFerramentaAgenda(
         hora: str(input.hora),
         duracaoMin: num(input.duracao_min),
         finalidade: input.finalidade ? str(input.finalidade) : undefined,
+        valor: input.valor != null ? num(input.valor) : undefined,
       });
       if ("erro" in r) return JSON.stringify({ ok: false, motivo: r.erro });
       return JSON.stringify({

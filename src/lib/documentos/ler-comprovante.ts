@@ -6,6 +6,7 @@
 export interface LeituraComprovante {
   valor: number | null; // em reais
   pagador: string | null;
+  favorecido: string | null; // nome de quem RECEBEU (deve ser o espaço)
   data: string | null; // data/hora como aparece no comprovante
   instituicao: string | null;
   id_transacao: string | null;
@@ -66,9 +67,9 @@ export async function lerComprovante(
     "Você lê comprovantes de pagamento brasileiros (Pix, TED, transferência). Extraia os dados com precisão. " +
     "Responda APENAS um objeto JSON, sem texto fora dele.";
   const instrucao =
-    "Extraia deste comprovante: valor (número, em reais), pagador (nome de quem PAGOU/enviou), data (data e hora como no comprovante), " +
+    "Extraia deste comprovante: valor (número, em reais), pagador (nome de quem PAGOU/enviou), favorecido (nome de quem RECEBEU/destinatário), data (data e hora como no comprovante), " +
     "instituicao (banco/instituição), id_transacao (id/E2E/autenticação se houver), e_pix (true se for Pix), confianca (alta|media|baixa conforme a legibilidade). " +
-    'Use null quando não encontrar. Responda só o JSON: {"valor":..,"pagador":..,"data":..,"instituicao":..,"id_transacao":..,"e_pix":..,"confianca":..}';
+    'Use null quando não encontrar. Responda só o JSON: {"valor":..,"pagador":..,"favorecido":..,"data":..,"instituicao":..,"id_transacao":..,"e_pix":..,"confianca":..}';
 
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -95,6 +96,7 @@ export async function lerComprovante(
     return {
       valor: numero(obj.valor),
       pagador: texto(obj.pagador),
+      favorecido: texto(obj.favorecido),
       data: texto(obj.data),
       instituicao: texto(obj.instituicao),
       id_transacao: texto(obj.id_transacao),
