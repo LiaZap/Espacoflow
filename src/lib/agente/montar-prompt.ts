@@ -12,7 +12,10 @@ import { PROMPT_BASE_HIGIA } from "./prompt-base";
  * de conhecimento (tabelas = fonte única auditável). Nunca embute secrets.
  * Com `opts.clienteId`, injeta a memória do cliente (perfil + notas anteriores).
  */
-export async function montarPromptHigia(opts?: { clienteId?: string }): Promise<string> {
+export async function montarPromptHigia(opts?: {
+  clienteId?: string;
+  agendamento?: boolean;
+}): Promise<string> {
   const [config] = await db
     .select()
     .from(agenteConfig)
@@ -64,7 +67,20 @@ export async function montarPromptHigia(opts?: { clienteId?: string }): Promise<
   const pix = blocoPix(config);
   const midia = await blocoMidia();
   const memoria = opts?.clienteId ? await blocoMemoria(opts.clienteId) : "";
-  return prompt + pix + midia + memoria;
+  const agenda = opts?.agendamento ? blocoAgendamento() : "";
+  return prompt + agenda + pix + midia + memoria;
+}
+
+/** Instrui a Hígia a AGENDAR sozinha usando as ferramentas (tool use). */
+function blocoAgendamento(): string {
+  return `\n\n<agendamento_automatico>
+Você pode AGENDAR sozinha, sem passar para um humano. Use as ferramentas:
+1) Ao falar de um horário, SEMPRE chame "consultar_disponibilidade" (data AAAA-MM-DD, hora HH:MM, duração em minutos) antes de afirmar que está livre. Nunca invente disponibilidade.
+2) Depois de qualificar o cliente e ele concordar com o horário, chame "agendar_reserva" para SEGURAR o horário. O sistema escolhe a sala livre. A reserva fica PROVISÓRIA.
+3) Em seguida, envie o Pix (marcador [PIX]) e explique, com clareza, que o horário está segurado de forma provisória e que a equipe confirma assim que o comprovante for enviado. NUNCA diga que o pagamento ou a reserva está confirmado.
+4) Se a ferramenta retornar indisponível ou erro, ofereça outro horário — não force.
+Use [HUMANO] só em exceções (reclamação, reembolso, ALTERAR/CANCELAR uma reserva já existente, nota fiscal, fora do perfil, ou algo que as ferramentas não resolvem).
+</agendamento_automatico>`;
 }
 
 /** Instrui a Hígia a usar o marcador [PIX] (o sistema injeta a chave correta). */

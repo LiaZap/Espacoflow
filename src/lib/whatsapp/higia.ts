@@ -10,6 +10,7 @@ import { getProvider } from "./provider";
 import { enviarHumanizado, limparTextoHigia } from "./humanizar";
 import { extrairMarcadores, resolverMidia, urlMidiaAbsoluta, tipoWhatsapp } from "./midia-marcadores";
 import { extrairPix, montarMensagensPix } from "./pix";
+import { FERRAMENTAS_AGENDA, executarFerramentaAgenda } from "@/lib/agente/ferramentas";
 
 export interface ResultadoHigia {
   enviada: boolean;
@@ -78,34 +79,63 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
   }
   if (mensagensApi.length === 0) return { enviada: false, motivo: "sem conteúdo" };
 
-  const system = await montarPromptHigia({ clienteId: conv.cliente_id });
+  // Agendamento autônomo: a Hígia ganha ferramentas (consultar disponibilidade /
+  // agendar) quando "reserva via IA" está ligada. O clienteId é fixado AQUI no
+  // servidor (a partir da conversa) — nunca vem do modelo.
+  const agendamento = !!cfg.reserva_via_ia;
+  const system = await montarPromptHigia({ clienteId: conv.cliente_id, agendamento });
+
+  type Bloco = { type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> };
+  const msgs: Array<{ role: "user" | "assistant"; content: unknown }> = [...mensagensApi];
   let texto = "";
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: cfg.modelo_ia || "claude-haiku-4-5",
-        max_tokens: 700,
-        system,
-        messages: mensagensApi,
-      }),
-    });
-    // 4xx é erro de requisição (não adianta retry → não vai para a DLQ). 5xx/429 retenta.
-    if (!res.ok) {
-      const retentavel = res.status >= 500 || res.status === 429;
-      return { enviada: false, motivo: `LLM HTTP ${res.status}${retentavel ? "" : " (definitivo)"}` };
+    // Loop de tool use: enquanto o modelo pedir ferramenta, executamos e devolvemos
+    // o resultado. Guard de 6 iterações evita loop infinito.
+    for (let i = 0; i < 6; i++) {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: cfg.modelo_ia || "claude-haiku-4-5",
+          max_tokens: 800,
+          system,
+          messages: msgs,
+          ...(agendamento ? { tools: FERRAMENTAS_AGENDA } : {}),
+        }),
+      });
+      // 4xx é erro de requisição (não adianta retry → não vai para a DLQ). 5xx/429 retenta.
+      if (!res.ok) {
+        const retentavel = res.status >= 500 || res.status === 429;
+        return { enviada: false, motivo: `LLM HTTP ${res.status}${retentavel ? "" : " (definitivo)"}` };
+      }
+      const data = (await res.json()) as { content?: Bloco[]; stop_reason?: string };
+      const blocos = data.content ?? [];
+      const chamadas = blocos.filter((b) => b.type === "tool_use");
+
+      if (data.stop_reason === "tool_use" && chamadas.length > 0) {
+        msgs.push({ role: "assistant", content: blocos });
+        const resultados = [];
+        for (const c of chamadas) {
+          const saida = await executarFerramentaAgenda(c.name ?? "", c.input ?? {}, {
+            clienteId: conv.cliente_id,
+          });
+          resultados.push({ type: "tool_result", tool_use_id: c.id, content: saida });
+        }
+        msgs.push({ role: "user", content: resultados });
+        continue;
+      }
+
+      texto = blocos
+        .filter((b) => b.type === "text" && b.text)
+        .map((b) => b.text as string)
+        .join("\n")
+        .trim();
+      break;
     }
-    const data = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
-    texto = (data.content ?? [])
-      .filter((b) => b.type === "text" && b.text)
-      .map((b) => b.text as string)
-      .join("\n")
-      .trim();
   } catch (e) {
     return { enviada: false, motivo: String(e) };
   }
