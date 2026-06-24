@@ -100,8 +100,9 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
+          // Com ferramentas, a mesma resposta pode ter tool_use (JSON) + texto → mais folga.
           model: cfg.modelo_ia || "claude-haiku-4-5",
-          max_tokens: 800,
+          max_tokens: agendamento ? 1500 : 800,
           system,
           messages: msgs,
           ...(agendamento ? { tools: FERRAMENTAS_AGENDA } : {}),
@@ -136,6 +137,35 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
         .trim();
       break;
     }
+
+    // Se o loop terminou SEM texto mas já houve ferramentas (estourou as iterações,
+    // ou truncou em max_tokens no meio de um tool_use), a reserva pode já ter sido
+    // criada. Faz UMA chamada final SEM ferramentas para o modelo fechar com texto
+    // (ex.: "segurei o horário, segue o Pix") — evita hold criado sem resposta.
+    if (!texto && msgs.length > mensagensApi.length) {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: cfg.modelo_ia || "claude-haiku-4-5",
+          max_tokens: 800,
+          system,
+          messages: msgs,
+        }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { content?: Bloco[] };
+        texto = (data.content ?? [])
+          .filter((b) => b.type === "text" && b.text)
+          .map((b) => b.text as string)
+          .join("\n")
+          .trim();
+      }
+    }
   } catch (e) {
     return { enviada: false, motivo: String(e) };
   }
@@ -154,6 +184,8 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
       "\\b(recebi|confirmei|aprovei|validei)\\b[^.!?\\n]{0,25}\\b(pix|pagamento|comprovante|reserva|valor)\\b",
       "(^|[\\n.!?]\\s*)(confirmad[oa]|aprovad[oa])\\s*[!.]",
       "\\b(t[áa]|est[áa])\\s+(tudo\\s+)?(pag[oa]|confirmad[oa])\\b",
+      "\\b(pix|pagamento)\\b[^.!?\\n]{0,15}\\b(caiu|entrou|compensad[oa])\\b",
+      "\\bquitad[oa]\\b",
     ].join("|"),
     "iu"
   );

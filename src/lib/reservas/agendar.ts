@@ -1,4 +1,4 @@
-import { and, eq, gt, lt, notInArray } from "drizzle-orm";
+import { and, eq, gt, lt, notInArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { reservas } from "@/lib/db/schema/reservas";
 import { salas } from "@/lib/db/schema/salas";
@@ -19,7 +19,14 @@ export interface SalaLivre {
 
 function janelaSanitizada(data: string, hora: string, duracaoMin: number): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) return "Data inválida (use AAAA-MM-DD).";
-  if (!/^\d{2}:\d{2}$/.test(hora)) return "Hora inválida (use HH:MM).";
+  // Hora 00:00–23:59 (regex de formato aceitaria 19:99/25:00 — barramos aqui).
+  if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(hora)) return "Hora inválida (use HH:MM, 24h).";
+  // Data de CALENDÁRIO real: 2026-02-30 / 2026-13-15 passam no regex mas não existem.
+  const [y, mo, d] = data.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) {
+    return "Data inválida (essa data não existe no calendário).";
+  }
   if (!Number.isInteger(duracaoMin) || duracaoMin < 60 || duracaoMin % 30 !== 0) {
     return "Duração inválida (mínimo 60 min, em múltiplos de 30).";
   }
@@ -102,25 +109,50 @@ export async function agendarReservaAgente(input: {
   if (!cli) return { erro: "Cliente não encontrado." };
   if (cli.bloqueado) return { erro: "Cliente bloqueado — encaminhe para a equipe." };
 
-  // Anti-flood: limita holds pendentes futuros por cliente.
-  const holds = await db
-    .select({ id: reservas.id })
-    .from(reservas)
-    .where(
-      and(
-        eq(reservas.cliente_id, clienteId),
-        eq(reservas.is_deleted, false),
-        eq(reservas.status_pagamento, "pendente"),
-        notInArray(reservas.status_reserva, STATUS_LIVRES),
-        gt(reservas.fim_em, new Date())
-      )
-    );
-  if (holds.length >= MAX_HOLDS_PENDENTES) {
-    return { erro: "Cliente já tem reservas provisórias demais aguardando pagamento — encaminhe para a equipe." };
-  }
-
   try {
     const reserva = await db.transaction(async (tx) => {
+      // Serializa por cliente (mesmo padrão da ingestão): impede holds duplicados em
+      // corrida — retry da fila pós-agendamento, inline concorrente ou 2 tool_use no turno.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${clienteId}))`);
+
+      // IDEMPOTÊNCIA: já existe hold pendente do MESMO cliente para ESTA janela? Reaproveita.
+      const [existente] = await tx
+        .select({ id: reservas.id, sala_id: reservas.sala_id })
+        .from(reservas)
+        .where(
+          and(
+            eq(reservas.cliente_id, clienteId),
+            eq(reservas.is_deleted, false),
+            eq(reservas.status_pagamento, "pendente"),
+            notInArray(reservas.status_reserva, STATUS_LIVRES),
+            eq(reservas.inicio_em, inicio),
+            eq(reservas.fim_em, fim)
+          )
+        );
+      if (existente) {
+        const [s] = await tx.select({ nome: salas.nome }).from(salas).where(eq(salas.id, existente.sala_id));
+        return { id: existente.id, salaNome: s?.nome ?? "sala reservada", reaproveitado: true };
+      }
+
+      // Anti-flood (agora DENTRO do lock = atômico): teto de holds pendentes futuros.
+      const holds = await tx
+        .select({ id: reservas.id })
+        .from(reservas)
+        .where(
+          and(
+            eq(reservas.cliente_id, clienteId),
+            eq(reservas.is_deleted, false),
+            eq(reservas.status_pagamento, "pendente"),
+            notInArray(reservas.status_reserva, STATUS_LIVRES),
+            gt(reservas.fim_em, new Date())
+          )
+        );
+      if (holds.length >= MAX_HOLDS_PENDENTES) {
+        throw new ReservaIndisponivel(
+          "Cliente já tem reservas provisórias demais aguardando pagamento — encaminhe para a equipe."
+        );
+      }
+
       // Salas ativas livres na janela (constraint GiST é o backstop final).
       const ativas = await tx
         .select({ id: salas.id, nome: salas.nome, prioridade: salas.prioridade_alocacao })
@@ -167,17 +199,19 @@ export async function agendarReservaAgente(input: {
           modalidade: "presencial",
         })
         .returning();
-      return { id: nova.id, salaNome: escolhida.nome };
+      return { id: nova.id, salaNome: escolhida.nome, reaproveitado: false };
     });
 
-    await registrarAuditoria({
-      acao: "criar",
-      entidade: "reservas",
-      registroId: reserva.id,
-      detalhes: `Hígia agendou (hold) ${data} ${hora} (${duracaoMin}min) em ${reserva.salaNome} — pendente de Pix`,
-    }).catch(() => undefined);
-
-    await sincronizarReserva(reserva.id).catch(() => undefined);
+    // Auditoria + Google só para hold NOVO (reaproveitado já foi registrado/sincronizado).
+    if (!reserva.reaproveitado) {
+      await registrarAuditoria({
+        acao: "criar",
+        entidade: "reservas",
+        registroId: reserva.id,
+        detalhes: `Hígia agendou (hold) ${data} ${hora} (${duracaoMin}min) em ${reserva.salaNome} — pendente de Pix`,
+      }).catch(() => undefined);
+      await sincronizarReserva(reserva.id).catch(() => undefined);
+    }
 
     return { ok: true, reservaId: reserva.id, salaNome: reserva.salaNome, data, hora, duracaoMin };
   } catch (e: unknown) {
