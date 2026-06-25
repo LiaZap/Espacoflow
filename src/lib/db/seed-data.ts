@@ -31,9 +31,9 @@ export const SALAS_SEED = [
 export const HORARIO_FUNCIONAMENTO = { abre_em: "07:00:00", fecha_em: "23:00:00" };
 
 export const PACOTES_SEED = [
-  { nome: "Hora avulsa", tipo: "avulsa", horas_incluidas: "1", validade_dias: 1, preco: "40.00", descricao: "Locação avulsa de sala privativa por 1 hora." },
-  { nome: "Pacote 2 horas", tipo: "pacote", horas_incluidas: "2", validade_dias: 60, preco: "65.00", descricao: "2 horas com desconto em relação à hora avulsa." },
-  { nome: "Pacote 4 horas", tipo: "pacote", horas_incluidas: "4", validade_dias: 60, preco: "125.00", descricao: "4 horas, ideal para um turno de atendimentos." },
+  // Avulsa (com desconto progressivo no dia, calculado por calcular_preco) + pacotes reais (10/20/40h).
+  // NÃO existem pacotes de 2h/4h — 2h/4h são horas avulsas com desconto.
+  { nome: "Hora avulsa", tipo: "avulsa", horas_incluidas: "1", validade_dias: 1, preco: "40.00", descricao: "Locação avulsa de sala privativa por 1 hora (desconto a partir de 2h no mesmo dia)." },
   { nome: "Pacote 10 horas", tipo: "pacote", horas_incluidas: "10", validade_dias: 60, preco: "305.00", descricao: "Saldo de horas para uso recorrente." },
   { nome: "Pacote 20 horas", tipo: "pacote", horas_incluidas: "20", validade_dias: 60, preco: "585.00", descricao: "Pacote intermediário com maior economia por hora." },
   { nome: "Pacote 40 horas", tipo: "pacote", horas_incluidas: "40", validade_dias: 60, preco: "1105.00", descricao: "Maior desconto progressivo entre os pacotes." },
@@ -41,11 +41,11 @@ export const PACOTES_SEED = [
   { nome: "Diária", tipo: "diaria", horas_incluidas: "16", validade_dias: 1, preco: "235.00", descricao: "Uso da sala por período diário, conforme disponibilidade." },
 ];
 
-/** Preços que a Hígia pode informar (após validar a necessidade). */
+/** Preços que a Hígia pode informar (após validar a necessidade). Avulsa progressiva
+ * é calculada por calcular_preco; aqui ficam as referências exibidas. */
 export const PRECOS_SEED = [
   { descricao: "Hora avulsa", valor: "40.00", unidade: "hora", ordem: 1 },
-  { descricao: "Pacote 2h", valor: "65.00", unidade: "pacote", ordem: 2 },
-  { descricao: "Pacote 4h", valor: "125.00", unidade: "pacote", ordem: 3 },
+  { descricao: "2 horas no mesmo dia (desconto)", valor: "65.00", unidade: "no dia", ordem: 2 },
   { descricao: "Pacote 10h", valor: "305.00", unidade: "pacote", ordem: 4 },
   { descricao: "Pacote 20h", valor: "585.00", unidade: "pacote", ordem: 5 },
   { descricao: "Pacote 40h", valor: "1105.00", unidade: "pacote", ordem: 6 },

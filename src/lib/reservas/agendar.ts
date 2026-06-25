@@ -10,8 +10,9 @@ import { calcularJanela, ABRE_MIN, JORNADA_MIN } from "./disponibilidade";
 
 /** Reservas que NÃO bloqueiam o horário (não contam como conflito). */
 const STATUS_LIVRES = ["cancelada", "no_show", "rascunho"];
-/** Teto de holds pendentes futuros por cliente — evita flood pelo chat. */
-const MAX_HOLDS_PENDENTES = 3;
+/** Teto de holds pendentes futuros por cliente — backstop anti-runaway (não atrapalha
+ * lotes reais: um cliente pode agendar várias sessões na mesma conversa). */
+const MAX_HOLDS_PENDENTES = 30;
 
 export interface SalaLivre {
   id: string;

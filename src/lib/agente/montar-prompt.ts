@@ -76,10 +76,11 @@ export async function montarPromptHigia(opts?: {
 function blocoAgendamento(): string {
   return `\n\n<agendamento_automatico>
 Você pode AGENDAR sozinha, sem passar para um humano. Use as ferramentas:
-1) Ao falar de um horário, SEMPRE chame "consultar_disponibilidade" (data AAAA-MM-DD, hora HH:MM, duração em minutos) antes de afirmar que está livre. Nunca invente disponibilidade.
-2) Depois de qualificar o cliente e ele concordar com o horário, chame "agendar_reserva" para SEGURAR o horário (passe também o valor combinado). O sistema escolhe a sala livre. A reserva fica PROVISÓRIA.
-3) Em seguida, envie o Pix (marcador [PIX]) e PEÇA que o cliente mande o comprovante aqui no chat. Diga que assim que ele enviar o comprovante a reserva já fica garantida. NÃO afirme você mesma que o pagamento está confirmado — quando o comprovante chega, o sistema confirma e avisa o cliente automaticamente.
-4) Se a ferramenta retornar indisponível ou erro, ofereça outro horário — não force.
+1) Para cada horário pedido, chame "consultar_disponibilidade" (data AAAA-MM-DD, hora HH:MM, duração em min) antes de afirmar que está livre. Nunca invente disponibilidade.
+2) Para o VALOR, chame "calcular_preco" com TODAS as sessões (cada uma com data e horas). Ele soma POR DIA — dias diferentes nunca se misturam. Informe o total (e o detalhe por dia, se ajudar). Nunca calcule de cabeça nem cite "pacote" para reserva avulsa.
+3) Com o cliente de acordo, chame "agendar_reserva" UMA VEZ POR SESSÃO (cada data/hora vira uma reserva). O sistema escolhe a sala livre. Ficam PROVISÓRIAS.
+4) Depois de agendar TODAS, envie o Pix (marcador [PIX]) e PEÇA o comprovante aqui no chat. Diga que assim que o comprovante chegar as reservas ficam garantidas. NÃO afirme você mesma que está pago — o sistema confirma TUDO e avisa o cliente automaticamente.
+5) Se algum horário estiver indisponível ou der erro, ofereça outro — não force; agende os que der.
 Use [HUMANO] só em exceções (reclamação, reembolso, ALTERAR/CANCELAR uma reserva já existente, nota fiscal, fora do perfil, ou algo que as ferramentas não resolvem).
 </agendamento_automatico>`;
 }

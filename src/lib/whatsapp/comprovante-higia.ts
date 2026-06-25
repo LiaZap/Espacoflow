@@ -121,8 +121,9 @@ export async function processarComprovanteHigia(params: {
   telefone: string;
   midiaUrl: string;
 }): Promise<ResultadoComprovante> {
-  // Pagamento pendente vinculado a uma reserva (o hold aguardando Pix).
-  const [pg] = await db
+  // TODOS os pagamentos pendentes vinculados a reservas (o lote aguardando Pix) —
+  // um comprovante único costuma quitar várias sessões agendadas na mesma conversa.
+  const pendentes = await db
     .select()
     .from(pagamentos)
     .where(
@@ -133,14 +134,16 @@ export async function processarComprovanteHigia(params: {
         isNotNull(pagamentos.reserva_id)
       )
     )
-    .orderBy(desc(pagamentos.created_at))
-    .limit(1);
-  if (!pg) return { tratou: false }; // sem reserva aguardando Pix → não é o fluxo de comprovante
+    .orderBy(desc(pagamentos.created_at));
+  if (pendentes.length === 0) return { tratou: false }; // nada aguardando Pix → não é o fluxo
+
+  const ids = pendentes.map((p) => p.id);
+  const reservaIds = pendentes.map((p) => p.reserva_id).filter((x): x is string => Boolean(x));
+  const totalEsperado = pendentes.reduce((acc, p) => acc + (p.valor != null ? Number(p.valor) : 0), 0);
 
   // Lê o comprovante (best-effort) — APENAS para registro/auditoria. Por decisão do
   // espaço, a confirmação é DIRETA após o envio do comprovante (o cliente assume o
-  // risco); a leitura não bloqueia nem escala — só gera a marca "confere?" para a
-  // equipe poder revisar depois.
+  // risco); a leitura não bloqueia — só gera a marca "confere?" para a equipe revisar.
   let base64 = "";
   let mediaType = "image/jpeg";
   try {
@@ -154,7 +157,7 @@ export async function processarComprovanteHigia(params: {
   }
   const leitura = base64 ? await lerComprovante(base64, mediaType).catch(() => null) : null;
 
-  // Marca informativa "confere?" (não bloqueia): valor/Pix/favorecido/data/anti-reuso.
+  // Marca informativa "confere?" (não bloqueia): valor (vs total do lote)/Pix/favorecido/data/anti-reuso.
   const [cfg] = await db.select().from(agenteConfig).where(eq(agenteConfig.is_deleted, false)).limit(1);
   const motivos: string[] = [];
   if (!leitura) {
@@ -162,16 +165,16 @@ export async function processarComprovanteHigia(params: {
   } else {
     if (leitura.e_pix !== true) motivos.push("não identificado como Pix");
     if (leitura.confianca !== "alta") motivos.push("leitura sem alta confiança");
-    if (!(leitura.valor != null && pg.valor != null && Math.abs(leitura.valor - Number(pg.valor)) < 0.01)) {
-      motivos.push("valor diverge da reserva");
+    if (!(leitura.valor != null && totalEsperado > 0 && Math.abs(leitura.valor - totalEsperado) < 0.01)) {
+      motivos.push("valor diverge do total");
     }
     if (!favorecidoConfere(leitura.favorecido, cfg?.pix_beneficiario)) motivos.push("favorecido diverge");
     if (dataAntiga(leitura.data)) motivos.push("data não recente");
-    if (await idTransacaoJaUsado(leitura.id_transacao, pg.id)) motivos.push("id reutilizado");
+    if (await idTransacaoJaUsado(leitura.id_transacao, ids[0])) motivos.push("id reutilizado");
   }
   const confere = motivos.length === 0;
 
-  // Registra o comprovante + a leitura no pagamento (para a equipe consultar).
+  // Registra o comprovante + a leitura em TODOS os pagamentos do lote (para a equipe consultar).
   await db
     .update(pagamentos)
     .set({
@@ -189,9 +192,9 @@ export async function processarComprovanteHigia(params: {
         : {}),
       updated_at: new Date(),
     })
-    .where(eq(pagamentos.id, pg.id));
+    .where(inArray(pagamentos.id, ids));
 
-  // ===== Confirma DIRETO o pagamento e a reserva (decisão do espaço; sem etapa da equipe). =====
+  // ===== Confirma DIRETO o lote inteiro (decisão do espaço; sem etapa da equipe). =====
   await db.transaction(async (tx) => {
     await tx
       .update(pagamentos)
@@ -199,36 +202,36 @@ export async function processarComprovanteHigia(params: {
         status: "confirmado",
         pago_em: new Date(),
         validado_em: new Date(),
-        id_externo: leitura?.id_transacao ?? pg.id_externo,
+        ...(leitura?.id_transacao ? { id_externo: leitura.id_transacao } : {}),
         // validado_por null = confirmado automaticamente pela Hígia (decisão do espaço).
         updated_at: new Date(),
       })
-      .where(eq(pagamentos.id, pg.id));
-    if (pg.reserva_id) {
+      .where(inArray(pagamentos.id, ids));
+    if (reservaIds.length) {
       await tx
         .update(reservas)
         .set({ status_pagamento: "pago", status_reserva: "confirmada", updated_at: new Date() })
-        .where(eq(reservas.id, pg.reserva_id));
+        .where(inArray(reservas.id, reservaIds));
     }
   });
 
   await registrarAuditoria({
     acao: "validar_pix",
     entidade: "pagamentos",
-    registroId: pg.id,
-    // Marca como WARN quando a leitura divergiu, p/ a equipe achar fácil no painel.
+    registroId: ids[0],
     severidade: confere ? "info" : "warn",
-    detalhes: confere
-      ? `Pagamento confirmado direto após comprovante (decisão do espaço). Leitura confere: ${obsLeitura(leitura as LeituraComprovante)}`
-      : `Pagamento confirmado direto após comprovante (decisão do espaço) COM DIVERGÊNCIA na leitura: ${motivos.join("; ")}.`,
+    detalhes: `Confirmado direto após comprovante (decisão do espaço): ${reservaIds.length} reserva(s). ${
+      confere ? `Leitura confere: ${leitura ? obsLeitura(leitura) : "—"}` : `DIVERGÊNCIA na leitura: ${motivos.join("; ")}`
+    }`,
   }).catch(() => undefined);
 
-  if (pg.reserva_id) await sincronizarReserva(pg.reserva_id).catch(() => undefined);
+  for (const rid of reservaIds) await sincronizarReserva(rid).catch(() => undefined);
 
-  const enviada = await responder(
-    params.conversaId,
-    params.telefone,
-    "Pagamento confirmado! ✅ Sua reserva está garantida. Te espero no horário combinado 🙌"
-  );
+  const n = reservaIds.length;
+  const msg =
+    n > 1
+      ? `Pagamento confirmado! ✅ Suas ${n} reservas estão garantidas. Te espero nos horários combinados 🙌`
+      : "Pagamento confirmado! ✅ Sua reserva está garantida. Te espero no horário combinado 🙌";
+  const enviada = await responder(params.conversaId, params.telefone, msg);
   return { tratou: true, enviada, confirmada: true };
 }
