@@ -137,30 +137,47 @@ export async function processarComprovanteHigia(params: {
     .limit(1);
   if (!pg) return { tratou: false }; // sem reserva aguardando Pix → não é o fluxo de comprovante
 
-  const escalarMsg =
-    "Recebi seu comprovante! 🙏 Vou confirmar com a equipe e já te aviso por aqui, tá?";
-
-  // Baixa a imagem do comprovante.
+  // Lê o comprovante (best-effort) — APENAS para registro/auditoria. Por decisão do
+  // espaço, a confirmação é DIRETA após o envio do comprovante (o cliente assume o
+  // risco); a leitura não bloqueia nem escala — só gera a marca "confere?" para a
+  // equipe poder revisar depois.
   let base64 = "";
   let mediaType = "image/jpeg";
   try {
     const res = await fetch(params.midiaUrl);
-    if (!res.ok) throw new Error("download");
-    mediaType = res.headers.get("content-type")?.split(";")[0] || "image/jpeg";
-    base64 = Buffer.from(await res.arrayBuffer()).toString("base64");
+    if (res.ok) {
+      mediaType = res.headers.get("content-type")?.split(";")[0] || "image/jpeg";
+      base64 = Buffer.from(await res.arrayBuffer()).toString("base64");
+    }
   } catch {
-    await escalarConversa(params.conversaId, "Não consegui baixar o comprovante enviado.");
-    const enviada = await responder(params.conversaId, params.telefone, escalarMsg);
-    return { tratou: true, enviada, confirmada: false };
+    // ignora falha de download — segue confirmando mesmo assim
   }
+  const leitura = base64 ? await lerComprovante(base64, mediaType).catch(() => null) : null;
 
-  const leitura = await lerComprovante(base64, mediaType);
-  // Guarda o comprovante e o que foi lido no pagamento (para a equipe, sempre).
+  // Marca informativa "confere?" (não bloqueia): valor/Pix/favorecido/data/anti-reuso.
+  const [cfg] = await db.select().from(agenteConfig).where(eq(agenteConfig.is_deleted, false)).limit(1);
+  const motivos: string[] = [];
+  if (!leitura) {
+    motivos.push("comprovante não lido");
+  } else {
+    if (leitura.e_pix !== true) motivos.push("não identificado como Pix");
+    if (leitura.confianca !== "alta") motivos.push("leitura sem alta confiança");
+    if (!(leitura.valor != null && pg.valor != null && Math.abs(leitura.valor - Number(pg.valor)) < 0.01)) {
+      motivos.push("valor diverge da reserva");
+    }
+    if (!favorecidoConfere(leitura.favorecido, cfg?.pix_beneficiario)) motivos.push("favorecido diverge");
+    if (dataAntiga(leitura.data)) motivos.push("data não recente");
+    if (await idTransacaoJaUsado(leitura.id_transacao, pg.id)) motivos.push("id reutilizado");
+  }
+  const confere = motivos.length === 0;
+
+  // Registra o comprovante + a leitura no pagamento (para a equipe consultar).
   await db
     .update(pagamentos)
     .set({
       comprovante_url: params.midiaUrl,
       comprovante_recebido: true,
+      leitura_confere: confere,
       ...(leitura
         ? {
             valor_lido: leitura.valor != null ? String(leitura.valor) : null,
@@ -174,37 +191,7 @@ export async function processarComprovanteHigia(params: {
     })
     .where(eq(pagamentos.id, pg.id));
 
-  if (!leitura) {
-    await escalarConversa(params.conversaId, "Não consegui ler o comprovante (sem chave de IA ou ilegível).");
-    const enviada = await responder(params.conversaId, params.telefone, escalarMsg);
-    return { tratou: true, enviada, confirmada: false };
-  }
-
-  const [cfg] = await db.select().from(agenteConfig).where(eq(agenteConfig.is_deleted, false)).limit(1);
-
-  // Critérios estritos para confirmação automática (TODOS precisam passar).
-  const motivos: string[] = [];
-  if (leitura.e_pix !== true) motivos.push("não identificado como Pix");
-  if (leitura.confianca !== "alta") motivos.push("leitura sem alta confiança");
-  if (!(leitura.valor != null && pg.valor != null && Math.abs(leitura.valor - Number(pg.valor)) < 0.01)) {
-    motivos.push("valor não confere com a reserva");
-  }
-  if (!favorecidoConfere(leitura.favorecido, cfg?.pix_beneficiario)) {
-    motivos.push("favorecido não confere com a conta do espaço");
-  }
-  if (dataAntiga(leitura.data)) motivos.push("data do comprovante não é recente");
-  if (await idTransacaoJaUsado(leitura.id_transacao, pg.id)) motivos.push("comprovante já utilizado");
-
-  const confere = motivos.length === 0;
-  await db.update(pagamentos).set({ leitura_confere: confere }).where(eq(pagamentos.id, pg.id));
-
-  if (!confere) {
-    await escalarConversa(params.conversaId, `Comprovante não validado automaticamente: ${motivos.join("; ")}.`);
-    const enviada = await responder(params.conversaId, params.telefone, escalarMsg);
-    return { tratou: true, enviada, confirmada: false };
-  }
-
-  // ===== Bateu 100% → confirma o pagamento e a reserva (decisão por critérios em código). =====
+  // ===== Confirma DIRETO o pagamento e a reserva (decisão do espaço; sem etapa da equipe). =====
   await db.transaction(async (tx) => {
     await tx
       .update(pagamentos)
@@ -212,8 +199,8 @@ export async function processarComprovanteHigia(params: {
         status: "confirmado",
         pago_em: new Date(),
         validado_em: new Date(),
-        id_externo: leitura.id_transacao ?? pg.id_externo,
-        // validado_por fica null = confirmado automaticamente pela Hígia (leitura IA).
+        id_externo: leitura?.id_transacao ?? pg.id_externo,
+        // validado_por null = confirmado automaticamente pela Hígia (decisão do espaço).
         updated_at: new Date(),
       })
       .where(eq(pagamentos.id, pg.id));
@@ -229,8 +216,11 @@ export async function processarComprovanteHigia(params: {
     acao: "validar_pix",
     entidade: "pagamentos",
     registroId: pg.id,
-    severidade: "warn",
-    detalhes: `Pagamento CONFIRMADO automaticamente pela Hígia (leitura IA): ${obsLeitura(leitura)}`,
+    // Marca como WARN quando a leitura divergiu, p/ a equipe achar fácil no painel.
+    severidade: confere ? "info" : "warn",
+    detalhes: confere
+      ? `Pagamento confirmado direto após comprovante (decisão do espaço). Leitura confere: ${obsLeitura(leitura as LeituraComprovante)}`
+      : `Pagamento confirmado direto após comprovante (decisão do espaço) COM DIVERGÊNCIA na leitura: ${motivos.join("; ")}.`,
   }).catch(() => undefined);
 
   if (pg.reserva_id) await sincronizarReserva(pg.reserva_id).catch(() => undefined);
@@ -241,19 +231,4 @@ export async function processarComprovanteHigia(params: {
     "Pagamento confirmado! ✅ Sua reserva está garantida. Te espero no horário combinado 🙌"
   );
   return { tratou: true, enviada, confirmada: true };
-}
-
-/** Marca a conversa como atendimento humano e registra o motivo (escalada). */
-async function escalarConversa(conversaId: string, motivo: string): Promise<void> {
-  await db
-    .update(whatsappConversas)
-    .set({ status: "humano", ultima_mensagem_em: new Date(), updated_at: new Date() })
-    .where(eq(whatsappConversas.id, conversaId));
-  await registrarAuditoria({
-    acao: "atualizar",
-    entidade: "whatsapp_conversas",
-    registroId: conversaId,
-    severidade: "warn",
-    detalhes: `Comprovante escalado para a equipe — ${motivo}`,
-  }).catch(() => undefined);
 }

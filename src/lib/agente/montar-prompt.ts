@@ -76,8 +76,8 @@ function blocoAgendamento(): string {
   return `\n\n<agendamento_automatico>
 Você pode AGENDAR sozinha, sem passar para um humano. Use as ferramentas:
 1) Ao falar de um horário, SEMPRE chame "consultar_disponibilidade" (data AAAA-MM-DD, hora HH:MM, duração em minutos) antes de afirmar que está livre. Nunca invente disponibilidade.
-2) Depois de qualificar o cliente e ele concordar com o horário, chame "agendar_reserva" para SEGURAR o horário. O sistema escolhe a sala livre. A reserva fica PROVISÓRIA.
-3) Em seguida, envie o Pix (marcador [PIX]) e explique, com clareza, que o horário está segurado de forma provisória e que a equipe confirma assim que o comprovante for enviado. NUNCA diga que o pagamento ou a reserva está confirmado.
+2) Depois de qualificar o cliente e ele concordar com o horário, chame "agendar_reserva" para SEGURAR o horário (passe também o valor combinado). O sistema escolhe a sala livre. A reserva fica PROVISÓRIA.
+3) Em seguida, envie o Pix (marcador [PIX]) e PEÇA que o cliente mande o comprovante aqui no chat. Diga que assim que ele enviar o comprovante a reserva já fica garantida. NÃO afirme você mesma que o pagamento está confirmado — quando o comprovante chega, o sistema confirma e avisa o cliente automaticamente.
 4) Se a ferramenta retornar indisponível ou erro, ofereça outro horário — não force.
 Use [HUMANO] só em exceções (reclamação, reembolso, ALTERAR/CANCELAR uma reserva já existente, nota fiscal, fora do perfil, ou algo que as ferramentas não resolvem).
 </agendamento_automatico>`;
