@@ -34,9 +34,9 @@ export const PACOTES_SEED = [
   // Avulsa (com desconto progressivo no dia, calculado por calcular_preco) + pacotes reais (10/20/40h).
   // NÃO existem pacotes de 2h/4h — 2h/4h são horas avulsas com desconto.
   { nome: "Hora avulsa", tipo: "avulsa", horas_incluidas: "1", validade_dias: 1, preco: "40.00", descricao: "Locação avulsa de sala privativa por 1 hora (desconto a partir de 2h no mesmo dia)." },
-  { nome: "Pacote 10 horas", tipo: "pacote", horas_incluidas: "10", validade_dias: 60, preco: "305.00", descricao: "Saldo de horas para uso recorrente." },
-  { nome: "Pacote 20 horas", tipo: "pacote", horas_incluidas: "20", validade_dias: 60, preco: "585.00", descricao: "Pacote intermediário com maior economia por hora." },
-  { nome: "Pacote 40 horas", tipo: "pacote", horas_incluidas: "40", validade_dias: 60, preco: "1105.00", descricao: "Maior desconto progressivo entre os pacotes." },
+  { nome: "Pacote 10 horas", tipo: "pacote", horas_incluidas: "10", validade_dias: 90, preco: "305.00", descricao: "Saldo de 10h, válido por 3 meses a partir do pagamento." },
+  { nome: "Pacote 20 horas", tipo: "pacote", horas_incluidas: "20", validade_dias: 90, preco: "585.00", descricao: "Saldo de 20h, válido por 3 meses a partir do pagamento." },
+  { nome: "Pacote 40 horas", tipo: "pacote", horas_incluidas: "40", validade_dias: 90, preco: "1105.00", descricao: "Saldo de 40h, válido por 3 meses a partir do pagamento." },
   { nome: "Plano mensal 4h/semana", tipo: "plano_mensal", horas_incluidas: "16", validade_dias: 30, preco: "455.00", descricao: "Presença semanal fixa com previsibilidade." },
   { nome: "Diária", tipo: "diaria", horas_incluidas: "16", validade_dias: 1, preco: "235.00", descricao: "Uso da sala por período diário, conforme disponibilidade." },
 ];
@@ -45,12 +45,13 @@ export const PACOTES_SEED = [
  * é calculada por calcular_preco; aqui ficam as referências exibidas. */
 export const PRECOS_SEED = [
   { descricao: "Hora avulsa", valor: "40.00", unidade: "hora", ordem: 1 },
-  { descricao: "2 horas no mesmo dia (desconto)", valor: "65.00", unidade: "no dia", ordem: 2 },
-  { descricao: "Pacote 10h", valor: "305.00", unidade: "pacote", ordem: 4 },
-  { descricao: "Pacote 20h", valor: "585.00", unidade: "pacote", ordem: 5 },
-  { descricao: "Pacote 40h", valor: "1105.00", unidade: "pacote", ordem: 6 },
-  { descricao: "Plano mensal 4h/semana", valor: "455.00", unidade: "mes", ordem: 7 },
-  { descricao: "Diária", valor: "235.00", unidade: "diaria", ordem: 8 },
+  { descricao: "2 horas", valor: "65.00", unidade: "no dia", ordem: 2 },
+  { descricao: "Período de 4h (meia diária)", valor: "125.00", unidade: "no dia", ordem: 3 },
+  { descricao: "Pacote 10h", valor: "305.00", unidade: "pacote (3 meses)", ordem: 4 },
+  { descricao: "Pacote 20h", valor: "585.00", unidade: "pacote (3 meses)", ordem: 5 },
+  { descricao: "Pacote 40h", valor: "1105.00", unidade: "pacote (3 meses)", ordem: 6 },
+  { descricao: "Mensal fixo (1x/semana, 4h)", valor: "455.00", unidade: "mes", ordem: 7 },
+  { descricao: "Diária (8h às 19h)", valor: "235.00", unidade: "diaria", ordem: 8 },
 ];
 
 /** Base de conhecimento oficial injetada no prompt da Hígia em runtime. */

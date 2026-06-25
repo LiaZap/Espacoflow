@@ -12,7 +12,7 @@ import { uploadArquivo, minioConfigurado } from "@/lib/storage/minio";
 import { emitirRecibo } from "@/lib/documentos/recibo";
 import { sincronizarReserva } from "@/lib/google/calendar";
 import { lerComprovante } from "@/lib/documentos/ler-comprovante";
-import { clientesPacotes, clientesPacotesMovimentos } from "@/lib/db/schema/pacotes";
+import { pacotes, clientesPacotes, clientesPacotesMovimentos } from "@/lib/db/schema/pacotes";
 import { exigirPermissao, primeiroErro } from "./_helpers";
 
 class PagamentoError extends Error {}
@@ -107,9 +107,21 @@ export async function validarPagamento(
           .for("update");
         if (cp) {
           if (status === "confirmado") {
+            // Validade do pacote conta a partir do PAGAMENTO (não da venda).
+            const [pac] = await tx
+              .select({ validade: pacotes.validade_dias })
+              .from(pacotes)
+              .where(eq(pacotes.id, cp.pacote_id));
+            const dias = pac?.validade ?? 90;
+            const validoAte = new Date(Date.now() + dias * 86_400_000).toISOString().slice(0, 10);
             await tx
               .update(clientesPacotes)
-              .set({ status: "ativo", updated_at: new Date(), modified_by: sessao.userId })
+              .set({
+                status: "ativo",
+                valido_ate: validoAte,
+                updated_at: new Date(),
+                modified_by: sessao.userId,
+              })
               .where(eq(clientesPacotes.id, cp.id));
           } else {
             await tx

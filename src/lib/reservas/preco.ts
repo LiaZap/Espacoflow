@@ -1,26 +1,43 @@
 /**
- * Cálculo de preço de reservas AVULSAS, determinístico e POR DIA.
- * Regra do cliente (UAT R01): a hora avulsa é R$40; a partir de 2h há desconto
- * progressivo no mesmo dia:
- *   1h = R$40 · 2h = R$65 · cada hora acima de 2h = +R$40 (ex.: 3h = 65 + 40 = 105).
+ * Cálculo de preço de reservas AVULSAS, determinístico e POR DIA (UAT R01/R02).
+ * Tarifas por dia (o sistema combina os blocos para dar o MENOR preço ao cliente):
+ *   1h = R$40 · 2h = R$65 · 4h (meia diária) = R$125 · diária (>=8h) = R$235 (teto).
+ * Exemplos confirmados: 3h = 65+40 = 105 · 4h = 125 · 5h = 125+40 = 165.
  * O total é a SOMA por dia (dias diferentes nunca se misturam).
  * Pacotes (10h/20h/40h) NÃO entram aqui — só quando o cliente já tem/escolhe um.
  */
 
 const HORA_AVULSA = 40; // R$/h
-const BLOCO_2H = 65; // R$ pelas 2 primeiras horas no mesmo dia
+const BLOCO_2H = 65; // R$ por 2h no mesmo dia
+const MEIA_DIARIA_4H = 125; // R$ por 4h no mesmo dia
+const DIARIA = 235; // R$ teto do dia (diária 8h–19h)
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-/** Preço avulso de um único dia, conforme as horas usadas nesse dia. */
+/**
+ * Preço avulso de UM dia. Usa os maiores blocos primeiro (mais baratos por hora) e
+ * preenche o resto; nunca passa do valor da diária.
+ */
 export function precoAvulsaDia(horas: number): number {
   if (!Number.isFinite(horas) || horas <= 0) return 0;
-  if (horas <= 1) return round2(HORA_AVULSA * horas);
-  // 2ª hora custa (65-40)=25; após 2h, cada hora cheia avulsa (40).
-  if (horas <= 2) return round2(HORA_AVULSA + (horas - 1) * (BLOCO_2H - HORA_AVULSA));
-  return round2(BLOCO_2H + (horas - 2) * HORA_AVULSA);
+  let resto = horas;
+  let total = 0;
+  while (resto >= 4) {
+    total += MEIA_DIARIA_4H;
+    resto -= 4;
+  }
+  while (resto >= 2) {
+    total += BLOCO_2H;
+    resto -= 2;
+  }
+  if (resto >= 1) {
+    total += HORA_AVULSA;
+    resto -= 1;
+  }
+  if (resto > 0) total += HORA_AVULSA * resto; // fração de hora (prorata 40/h)
+  return round2(Math.min(total, DIARIA));
 }
 
 export interface SessaoPreco {

@@ -57,6 +57,13 @@
       "when": 1781826142041,
       "tag": "0007_wonderful_korath",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1782425686572,
+      "tag": "0008_uat_precos_validade",
+      "breakpoints": true
     }
   ]
 }
