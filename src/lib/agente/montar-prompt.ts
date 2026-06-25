@@ -1,7 +1,8 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { agenteConfig, agentePrecos, agenteBaseConhecimento, agenteMidia } from "@/lib/db/schema/agente";
 import { clientes } from "@/lib/db/schema/clientes";
+import { reservas } from "@/lib/db/schema/reservas";
 import { obterMemoria } from "@/lib/mongo/client";
 import { slugMidia } from "@/lib/whatsapp/midia-marcadores";
 import { formatarBRL } from "@/lib/utils";
@@ -87,7 +88,7 @@ Use [HUMANO] só em exceções (reclamação, reembolso, ALTERAR/CANCELAR uma re
 function blocoPix(config?: { pix_chave?: string | null } | null): string {
   if (!config?.pix_chave?.trim()) return "";
   return `\n\n<pagamento_pix>
-Quando o cliente confirmar que vai pagar (ou pedir a chave Pix), escreva o marcador [PIX] sozinho numa linha — o sistema envia os dados do Pix automaticamente, com a chave correta. NUNCA escreva ou invente a chave Pix você mesma. Não confirme o pagamento (quem confirma é a equipe, após o comprovante).
+Quando o cliente confirmar que vai pagar (ou pedir a chave Pix), escreva o marcador [PIX] sozinho numa linha — o sistema envia os dados do Pix automaticamente, com a chave correta. NUNCA escreva ou invente a chave Pix você mesma. Depois, peça o comprovante aqui no chat: ao recebê-lo, o sistema confirma a reserva automaticamente. Não afirme você mesma que o pagamento está confirmado.
 </pagamento_pix>`;
 }
 
@@ -122,8 +123,24 @@ async function blocoMemoria(clienteId: string): Promise<string> {
     .where(and(eq(clientes.id, clienteId), eq(clientes.is_deleted, false)));
   if (!cli) return "";
 
+  // Recorrente = já é cliente da base OU já teve reserva confirmada/concluída antes.
+  // Sinaliza para a Hígia NÃO repetir a qualificação de perfil (maca etc.).
+  const passadas = await db
+    .select({ id: reservas.id })
+    .from(reservas)
+    .where(
+      and(
+        eq(reservas.cliente_id, clienteId),
+        eq(reservas.is_deleted, false),
+        inArray(reservas.status_reserva, ["confirmada", "concluida"])
+      )
+    )
+    .limit(1);
+  const recorrente = cli.status_lead === "cliente" || passadas.length > 0;
+
   const mem = await obterMemoria(clienteId).catch(() => null);
   const linhas: string[] = [
+    `- Cliente recorrente: ${recorrente ? "sim" : "não"}`,
     `- Nome: ${cli.nome}${cli.nome_chamada ? ` (chamar de ${cli.nome_chamada})` : ""}`,
     `- Status do lead: ${cli.status_lead}`,
   ];
