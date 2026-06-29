@@ -6,6 +6,7 @@ import { FILA_RESPONDER_HIGIA } from "./filas";
 import { gerarRespostaHigia } from "@/lib/whatsapp/higia";
 import { db } from "@/lib/db";
 import { jobsFila } from "@/lib/db/schema/jobs";
+import { APP_VERSION } from "@/lib/version";
 
 // Motivos de "não enviada" que NÃO são erro (não devem disparar retry/DLQ).
 const NAO_ERRO =
@@ -48,7 +49,9 @@ worker.on("failed", async (job, err) => {
 });
 
 worker.on("ready", () =>
-  console.log(`[worker] fila "${FILA_RESPONDER_HIGIA}" pronta (FIFO, concurrency=1)`)
+  console.log(
+    `[worker] versão ${APP_VERSION} — fila "${FILA_RESPONDER_HIGIA}" pronta (FIFO, concurrency=1)`
+  )
 );
 
 async function encerrar() {
