@@ -75,11 +75,19 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
   }
 
   const mensagens = historico
-    .filter((h) => h.conteudo)
-    .map((h) => ({
-      role: h.origem === "user" ? ("user" as const) : ("assistant" as const),
-      content: h.conteudo as string,
-    }));
+    .map((h) => {
+      const txt = (h.conteudo ?? "").trim();
+      // Mídia (imagem/áudio/arquivo) costuma vir SEM texto. Sem um placeholder ela
+      // seria descartada e a Hígia ficaria muda — ex.: cliente manda comprovante sem
+      // ter um pagamento pendente (não cai no fluxo de comprovante). Dá um texto mínimo
+      // para o modelo poder responder.
+      const content = txt || (h.tipo !== "text" ? "[o cliente enviou uma imagem/arquivo]" : "");
+      return {
+        role: h.origem === "user" ? ("user" as const) : ("assistant" as const),
+        content,
+      };
+    })
+    .filter((m) => m.content);
   if (mensagens.length === 0) return { enviada: false, motivo: "sem conteúdo" };
 
   // A API da Anthropic exige papéis ALTERNADOS começando em 'user'. No WhatsApp o

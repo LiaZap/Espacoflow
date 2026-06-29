@@ -42,11 +42,11 @@ const ROTEIRO_PADRAO = [
   "Oi, tudo bem? Sou psicóloga e queria alugar uma sala pra atender. Vocês têm internet pra atendimento online?",
   "É atendimento individual, só eu e o paciente",
   "Não uso maca, é só terapia de conversa",
-  "Atendo online, então preciso de uma mesa pro notebook",
-  "Queria sexta que vem, 03/07, das 9h às 11h",
-  "Pode reservar sim",
-  "Aceito a política de uso",
-  "[comprovante]",
+  "Atendo online, então vou precisar de uma mesa pro notebook",
+  "Queria sexta, 03/07, das 9h às 11h",
+  "Aceito a política de uso", // libera a trava do cadastro/aceite
+  "Isso, pode confirmar a reserva", // o "sim" final -> cria o hold (agendar_reserva)
+  "[comprovante]", // agora existe pagamento pendente -> confirma + sincroniza + promove
 ];
 
 async function msgsDaConversa(conversaId: string) {
