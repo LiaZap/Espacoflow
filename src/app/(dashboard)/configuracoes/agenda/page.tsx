@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AgendaForm } from "./_components/agenda-form";
+import { Ressincronizar } from "./_components/ressincronizar";
 
 export const dynamic = "force-dynamic";
 
@@ -71,8 +72,14 @@ export default async function AgendaPage({
           <CardTitle>Configuração</CardTitle>
           <CardDescription>Qual agenda usar e se as reservas são sincronizadas.</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <AgendaForm config={cfg} />
+          <div className="border-t pt-4">
+            <p className="mb-2 text-sm text-muted-foreground">
+              Reservas confirmadas antes de conectar não vão sozinhas para a agenda. Empurre-as agora:
+            </p>
+            <Ressincronizar />
+          </div>
         </CardContent>
       </Card>
 
