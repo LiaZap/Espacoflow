@@ -137,7 +137,10 @@ export async function agendarReservaAgente(input: {
         return { id: existente.id, salaNome: s?.nome ?? "sala reservada", reaproveitado: true };
       }
 
-      // Anti-flood (agora DENTRO do lock = atômico): teto de holds pendentes futuros.
+      // Anti-flood (dentro do lock): só conta holds pendentes RECENTES (últimas 24h).
+      // Holds antigos abandonados (ex.: de rodadas de teste anteriores) NÃO bloqueiam
+      // um lote novo legítimo. Backstop contra loop, não contra uso normal.
+      const corte24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const holds = await tx
         .select({ id: reservas.id })
         .from(reservas)
@@ -147,12 +150,14 @@ export async function agendarReservaAgente(input: {
             eq(reservas.is_deleted, false),
             eq(reservas.status_pagamento, "pendente"),
             notInArray(reservas.status_reserva, STATUS_LIVRES),
-            gt(reservas.fim_em, new Date())
+            gt(reservas.fim_em, new Date()),
+            gt(reservas.created_at, corte24h)
           )
         );
       if (holds.length >= MAX_HOLDS_PENDENTES) {
+        // Mensagem para o cliente continuar (NÃO encaminha para humano).
         throw new ReservaIndisponivel(
-          "Cliente já tem reservas provisórias demais aguardando pagamento — encaminhe para a equipe."
+          "Você já tem várias reservas em aberto aguardando pagamento. Conclua o Pix das anteriores e eu sigo com as novas, tá?"
         );
       }
 
@@ -233,7 +238,7 @@ export async function agendarReservaAgente(input: {
     if (typeof e === "object" && e !== null && "code" in e && (e as { code: string }).code === "23P01") {
       return { erro: "Horário acabou de ser ocupado — ofereça outro horário." };
     }
-    return { erro: "Não consegui registrar a reserva agora. Encaminhe para a equipe." };
+    return { erro: "Não consegui registrar esse horário agora — tente novamente em instantes." };
   }
 }
 

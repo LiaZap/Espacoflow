@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 // Marcador de versão para conferir, em produção, QUAL build está no ar.
 // Atualize a cada release relevante (ou injete APP_VERSION no ambiente).
-const VERSION = process.env.APP_VERSION || "higia-uat-r02-precos-limpeza-2026-06-29";
+const VERSION = process.env.APP_VERSION || "higia-uat-r02b-holds24h-regras-2026-06-29";
 
 /** Healthcheck + versão. GET /api/health → { ok, version }. */
 export async function GET() {
