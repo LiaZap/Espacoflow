@@ -205,9 +205,13 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     "iu"
   );
   if (RE_CONFIRMA.test(texto)) {
+    // Quem confirma pagamento é o CÓDIGO (processarComprovanteHigia), ao receber a
+    // IMAGEM do comprovante — nunca o texto do LLM. Se o LLM tentou afirmar
+    // confirmação (ex.: cliente mandou a palavra "comprovante" sem anexar o print),
+    // troca por um pedido do comprovante real. NÃO escala (sem handoff para equipe).
     violou = true;
-    escalar = true;
-    texto = "Boa! Deixa eu confirmar isso com a equipe pra te passar com segurança. Já te retorno por aqui 🙏";
+    texto =
+      "Pra confirmar, me envia aqui o comprovante (print ou imagem) do Pix, tá? Assim que chegar eu confirmo na hora 🙏";
   }
 
   // A Hígia pode pedir fotos ([FOTO: id]) e o Pix ([PIX]). Separa os marcadores:
@@ -310,14 +314,14 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     .set({ ultima_mensagem_em: new Date(), ...(escalar ? { status: "humano" } : {}) })
     .where(eq(whatsappConversas.id, conversaId));
 
-  if (escalar) {
+  if (escalar || violou) {
     await registrarAuditoria({
       acao: "atualizar",
       entidade: "whatsapp_conversas",
       registroId: conversaId,
       severidade: violou ? "warn" : "info",
       detalhes: violou
-        ? "Guardrail: a Hígia tentou confirmar pagamento/reserva — conversa escalada para humano."
+        ? "Guardrail: a Hígia tentou afirmar confirmação sem comprovante — texto trocado por pedido do print (sem escalar)."
         : "A Hígia escalou a conversa para a equipe ([HUMANO]).",
     }).catch(() => undefined);
   }
