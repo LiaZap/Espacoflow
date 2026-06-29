@@ -1,7 +1,10 @@
 import { listarAuditoria } from "@/lib/actions/auditoria";
+import { getSession } from "@/lib/auth";
+import { temPapel } from "@/lib/auth/rbac";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { formatarDataHora } from "@/lib/utils";
+import { LimparTeste } from "./_components/limpar-teste";
 
 const SEV_VARIANTE: Record<string, "secondary" | "warning" | "destructive"> = {
   info: "secondary",
@@ -10,15 +13,17 @@ const SEV_VARIANTE: Record<string, "secondary" | "warning" | "destructive"> = {
 };
 
 export default async function PainelOwnerPage() {
-  const eventos = await listarAuditoria();
+  const [eventos, sessao] = await Promise.all([listarAuditoria(), getSession()]);
   const exclusoes = eventos.filter((e) => e.acao === "excluir");
   const negados = eventos.filter((e) => e.acao === "acesso_negado");
+  const podeLimpar = sessao ? temPapel(sessao.role, "owner") : false;
 
   return (
     <div className="space-y-6 p-8">
       <PageHeader
         titulo="Painel Owner"
         descricao="Trilha de auditoria: quem fez o quê e quando. Inclui exclusões e acessos negados."
+        acao={podeLimpar ? <LimparTeste /> : undefined}
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
