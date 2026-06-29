@@ -12,6 +12,7 @@ import {
   Bot,
   Images,
   BarChart3,
+  ShieldCheck,
   Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ const ICONES = {
   bot: Bot,
   image: Images,
   chart: BarChart3,
+  shield: ShieldCheck,
   settings: Settings,
 } as const;
 

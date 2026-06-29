@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pagamentos } from "@/lib/db/schema/pagamentos";
 import { reservas } from "@/lib/db/schema/reservas";
+import { clientes } from "@/lib/db/schema/clientes";
 import { agenteConfig } from "@/lib/db/schema/agente";
 import { whatsappConversas, whatsappMensagens } from "@/lib/db/schema/whatsapp";
 import { lerComprovante, type LeituraComprovante } from "@/lib/documentos/ler-comprovante";
@@ -213,6 +214,19 @@ export async function processarComprovanteHigia(params: {
         .set({ status_pagamento: "pago", status_reserva: "confirmada", updated_at: new Date() })
         .where(inArray(reservas.id, reservaIds));
     }
+    // Promove a "cliente" após a 1ª reserva confirmada — só se já houve aceite da
+    // política (cadastro). Garante "cadastro + aceite ANTES da mudança de status".
+    await tx
+      .update(clientes)
+      .set({ status_lead: "cliente", updated_at: new Date() })
+      .where(
+        and(
+          eq(clientes.id, params.clienteId),
+          eq(clientes.is_deleted, false),
+          ne(clientes.status_lead, "cliente"),
+          isNotNull(clientes.aceitou_politica_em)
+        )
+      );
   });
 
   await registrarAuditoria({

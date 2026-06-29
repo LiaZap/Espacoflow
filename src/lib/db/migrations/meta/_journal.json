@@ -64,6 +64,13 @@
       "when": 1782425686572,
       "tag": "0008_uat_precos_validade",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1782750734772,
+      "tag": "0009_uat_r03_onboarding_salas",
+      "breakpoints": true
     }
   ]
 }

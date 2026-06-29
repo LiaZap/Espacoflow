@@ -27,10 +27,14 @@ export const clientes = pgTable(
     // novo | qualificando | apto | fora_perfil | cliente | inativo
     status_lead: text("status_lead").notNull().default("novo"),
     qualification_score: integer("qualification_score"),
+    profissao: text("profissao"),
     interesses: text("interesses"),
     dores: text("dores"),
     origem: text("origem"),
     bloqueado: boolean("bloqueado").notNull().default(false),
+    // Qualificação de perfil concluída (tipo de uso/pessoas/maca) — trava o agendamento
+    // de cliente novo até ter sido qualificado.
+    perfil_qualificado_em: timestamp("perfil_qualificado_em"),
     aceitou_politica_em: timestamp("aceitou_politica_em"),
     ultima_atividade: timestamp("ultima_atividade"),
 

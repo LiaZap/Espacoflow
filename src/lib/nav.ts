@@ -16,5 +16,6 @@ export const NAV_PRINCIPAL: ItemNav[] = [
   { href: "/agente", label: "Agente Hígia", icon: "bot", recurso: "agente" },
   { href: "/midia", label: "Fotos da Hígia", icon: "image", recurso: "agente" },
   { href: "/relatorios", label: "Relatórios", icon: "chart", recurso: "relatorios" },
+  { href: "/painel-owner", label: "Painel Owner", icon: "shield", recurso: "painel_owner" },
   { href: "/configuracoes", label: "Configurações", icon: "settings", recurso: "configuracoes" },
 ];

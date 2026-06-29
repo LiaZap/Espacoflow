@@ -13,10 +13,12 @@ export const OWNER_SEED = {
 };
 
 export const SALAS_SEED = [
-  { nome: "Sala 01", prioridade_alocacao: 1 },
-  { nome: "Sala 02", prioridade_alocacao: 2 },
-  { nome: "Sala 03", prioridade_alocacao: 3 },
-  { nome: "Sala 04", prioridade_alocacao: 4 },
+  // Sala 02 NÃO tem mesa (destino padrão de psicólogo/terapia de conversa). As demais
+  // têm mesa de apoio (p/ quem precisa de notebook etc.).
+  { nome: "Sala 01", prioridade_alocacao: 1, tem_mesa: true },
+  { nome: "Sala 02", prioridade_alocacao: 2, tem_mesa: false },
+  { nome: "Sala 03", prioridade_alocacao: 3, tem_mesa: true },
+  { nome: "Sala 04", prioridade_alocacao: 4, tem_mesa: true },
 ].map((s) => ({
   ...s,
   tipo: "privativa",
@@ -25,7 +27,9 @@ export const SALAS_SEED = [
   reservavel_publicamente: true,
   so_sob_pedido: false,
   preco_hora: "40.00",
-  descricao: "Sala privativa climatizada, isolamento acústico, poltronas reclináveis e Wi-Fi.",
+  descricao: s.tem_mesa
+    ? "Sala privativa climatizada, isolamento acústico, poltronas, mesa de apoio e Wi-Fi."
+    : "Sala privativa climatizada, isolamento acústico, poltronas reclináveis (sem mesa) e Wi-Fi.",
 }));
 
 export const HORARIO_FUNCIONAMENTO = { abre_em: "07:00:00", fecha_em: "23:00:00" };
@@ -56,12 +60,14 @@ export const PRECOS_SEED = [
 
 /** Base de conhecimento oficial injetada no prompt da Hígia em runtime. */
 export const BASE_CONHECIMENTO_SEED = [
-  { categoria: "estrutura", titulo: "Estrutura do espaço", prioridade: 1, conteudo: "Salas privativas climatizadas com isolamento acústico, poltronas reclináveis, Wi-Fi de alta qualidade, recepção para receber os clientes dos profissionais e estacionamento público próximo. Uso individual ou reuniões com até 3 pessoas." },
+  { categoria: "estrutura", titulo: "Estrutura do espaço", prioridade: 1, conteudo: "Salas privativas climatizadas com isolamento acústico, poltronas reclináveis, Wi-Fi de alta qualidade, recepção para receber os clientes dos profissionais e estacionamento público próximo. Uso individual ou reuniões com até 3 pessoas. A Sala 02 não tem mesa (ideal para terapia de conversa); as demais têm mesa de apoio." },
+  { categoria: "internet", titulo: "Internet / atendimento online", prioridade: 1, conteudo: "Sim, há Wi-Fi de alta qualidade em todas as salas, adequado para atendimento online por vídeo (telepsicologia, reuniões, mentorias). Quem atende online costuma preferir uma sala com mesa para apoiar o notebook." },
   { categoria: "horario", titulo: "Funcionamento", prioridade: 1, conteudo: "Todos os dias, inclusive feriados, das 07h às 23h, sempre mediante reserva e disponibilidade da agenda." },
   { categoria: "localizacao", titulo: "Localização", prioridade: 2, conteudo: "Sudoeste, Brasília – DF." },
   { categoria: "reserva", titulo: "Regras de reserva e pontualidade", prioridade: 1, conteudo: "Reserva mínima de 1 hora; agenda em intervalos de 30 minutos. Pontualidade rigorosa, sem tolerância para atrasos. Permanência além do horário é cobrada automaticamente como 1 hora adicional." },
   { categoria: "cancelamento", titulo: "Cancelamento e reagendamento", prioridade: 1, conteudo: "Cancelamento com no mínimo 12 horas de antecedência vira crédito com validade de 60 dias. Fora desse prazo, não gera crédito. Reagendamento sujeito à disponibilidade." },
-  { categoria: "pagamento", titulo: "Pagamento", prioridade: 1, conteudo: "Exclusivamente via Pix. O cliente envia a cópia do comprovante no WhatsApp; a confirmação do pagamento é feita pela equipe interna (nunca pela Hígia)." },
+  { categoria: "pagamento", titulo: "Pagamento", prioridade: 1, conteudo: "Exclusivamente via Pix. O cliente faz o Pix e envia o comprovante aqui no WhatsApp; assim que chega, o sistema confirma a reserva automaticamente." },
+  { categoria: "cadastro", titulo: "Cadastro e aceite da política", prioridade: 1, conteudo: "Antes da primeira reserva, o cliente novo deve preencher o cadastro e aceitar a política de uso pelo formulário: https://docs.google.com/forms/d/e/1FAIpQLSdKhPouX6I5ll3l-o-vVREGD7oA4lAt8t7XuZLAzni8oWAYLA/viewform" },
   { categoria: "fora_perfil", titulo: "O que o FLOW não oferece", prioridade: 1, conteudo: "Sem maca e sem procedimentos corporais; sem endereço fiscal; sem reuniões com mais de 3 pessoas; sem serviços que exijam estrutura ou licença sanitária específica. Nesses casos o cliente está fora do perfil." },
   { categoria: "encerramento", titulo: "Ao encerrar o uso da sala", prioridade: 2, conteudo: "Desligar o ar-condicionado, organizar mesa e cadeiras, apagar as luzes, ajustar a tarja da porta para LIVRE e segurar a porta por 3 segundos pelo lado de fora para acionar a fechadura." },
   { categoria: "objetos", titulo: "Objetos esquecidos", prioridade: 3, conteudo: "O FLOW não se responsabiliza por objetos esquecidos. Caso esqueça algo, avisar o quanto antes." },

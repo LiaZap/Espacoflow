@@ -89,13 +89,16 @@ export async function montarPromptHigia(opts?: {
 /** Instrui a Hígia a AGENDAR sozinha usando as ferramentas (tool use). */
 function blocoAgendamento(): string {
   return `\n\n<agendamento_automatico>
-Você pode AGENDAR sozinha, sem passar para um humano. Use as ferramentas:
-1) Para cada horário pedido, chame "consultar_disponibilidade" (data AAAA-MM-DD, hora HH:MM, duração em min) antes de afirmar que está livre. Nunca invente disponibilidade.
-2) Para o VALOR, chame "calcular_preco" com TODAS as sessões (cada uma com data e horas). Ele soma POR DIA — dias diferentes nunca se misturam. Informe o total (e o detalhe por dia, se ajudar). Nunca calcule de cabeça nem cite "pacote" para reserva avulsa.
-3) Com o cliente de acordo, chame "agendar_reserva" UMA VEZ POR SESSÃO (cada data/hora vira uma reserva). O sistema escolhe a sala livre. Ficam PROVISÓRIAS.
-4) Depois de agendar TODAS, envie o Pix (marcador [PIX]) e PEÇA o comprovante aqui no chat. Diga que assim que o comprovante chegar as reservas ficam garantidas. NÃO afirme você mesma que está pago — o sistema confirma TUDO e avisa o cliente automaticamente.
-5) Se algum horário estiver indisponível ou der erro, ofereça outro — não force; agende os que der.
-Use [HUMANO] só em exceções (reclamação, reembolso, ALTERAR/CANCELAR uma reserva já existente, nota fiscal, fora do perfil, ou algo que as ferramentas não resolvem).
+Você pode AGENDAR sozinha, sem passar para um humano. Para CLIENTE NOVO, use as ferramentas nesta ordem:
+1) "qualificar_cliente" — depois de coletar tipo de uso, profissão, nº de pessoas e se precisa de maca/procedimento. Se retornar fora_perfil, envie a mensagem devolvida e NÃO agende.
+2) Mostre as fotos das salas ([FOTO: identificador]) e informe o VALOR com "calcular_preco" (TODAS as sessões; soma POR DIA, dias nunca se misturam; nunca cite "pacote" para avulsa).
+3) "aceitar_politica" — depois de enviar o link do formulário de cadastro e o cliente confirmar que aceita a política.
+4) "consultar_disponibilidade" (data AAAA-MM-DD, hora HH:MM, duração em min) antes de afirmar que está livre. Nunca invente disponibilidade.
+5) "agendar_reserva" — UMA VEZ POR SESSÃO, preenchendo precisa_mesa (true se precisa de mesa/apoio p/ notebook; false para psicólogo de conversa → Sala 02 sem mesa). Ficam PROVISÓRIAS.
+6) Depois de agendar TODAS, envie o Pix ([PIX]) e PEÇA o comprovante aqui. Diga que assim que ele chegar as reservas ficam garantidas. NÃO afirme você mesma que está pago — o sistema confirma TUDO e avisa o cliente.
+CLIENTE RECORRENTE ("Cliente recorrente: sim" na memória): PULE os passos 1 e 3 — já foi qualificado e já aceitou a política. Vá direto à disponibilidade e à reserva.
+Se algum horário estiver indisponível ou der erro, ofereça outro — não force; agende os que der.
+Use [HUMANO] só em exceções (reclamação, reembolso, ALTERAR/CANCELAR uma reserva já existente, nota fiscal, ou algo que as ferramentas não resolvem).
 </agendamento_automatico>`;
 }
 
@@ -123,7 +126,7 @@ async function blocoMidia(): Promise<string> {
 
   return `\n\n<midia_disponivel>
 Você pode ENVIAR estas fotos/arquivos pelo WhatsApp. Para enviar um, escreva o marcador EXATAMENTE assim, sozinho numa linha: [FOTO: identificador]. Pode enviar vários (um marcador por linha).
-Envie só quando fizer sentido (o cliente quer conhecer/ver as salas, pediu fotos, está decidindo). Não despeje todas as fotos sem o cliente pedir.
+Com CLIENTE NOVO, mostre 2–3 fotos das salas/ambiente durante o atendimento (depois de qualificar, ao apresentar o espaço/valores) para ele conhecer — de forma natural. Fora isso, envie quando fizer sentido (cliente quer ver/pediu/está decidindo); não despeje todas de uma vez sem contexto.
 NUNCA escreva a palavra "marcador", não cite o identificador em voz alta e não anuncie que vai mandar foto — apenas inclua o marcador e siga a conversa naturalmente.
 Disponíveis (identificador: descrição):
 ${linhas.join("\n")}
@@ -159,9 +162,25 @@ async function blocoMemoria(clienteId: string): Promise<string> {
     `- Nome: ${cli.nome}${cli.nome_chamada ? ` (chamar de ${cli.nome_chamada})` : ""}`,
     `- Status do lead: ${cli.status_lead}`,
   ];
+  if (cli.profissao) linhas.push(`- Profissão: ${cli.profissao}`);
   if (cli.interesses) linhas.push(`- Interesses: ${cli.interesses}`);
   if (cli.dores) linhas.push(`- Dores/necessidades: ${cli.dores}`);
-  if (cli.aceitou_politica_em) linhas.push("- Já aceitou a política de uso.");
+  // Para cliente NOVO, sinaliza o que ainda falta no onboarding (o sistema bloqueia a
+  // reserva sem isso). Recorrente já passou por tudo — não repetir.
+  if (recorrente) {
+    linhas.push("- Onboarding concluído (já qualificado e aceitou a política). NÃO requalifique nem peça aceite de novo.");
+  } else {
+    linhas.push(
+      cli.perfil_qualificado_em
+        ? "- Perfil já qualificado."
+        : "- ⚠️ Ainda NÃO qualificado — use qualificar_cliente antes de agendar."
+    );
+    linhas.push(
+      cli.aceitou_politica_em
+        ? "- Já aceitou a política de uso."
+        : "- ⚠️ Ainda NÃO aceitou a política — envie o cadastro e use aceitar_politica antes de agendar."
+    );
+  }
   if (mem?.resumo) linhas.push(`- Notas anteriores: ${String(mem.resumo)}`);
   if (mem?.ultima_interacao) linhas.push(`- Última interação: ${String(mem.ultima_interacao)}`);
 

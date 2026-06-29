@@ -1,4 +1,4 @@
-import { and, eq, gt, lt, notInArray, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, notInArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { reservas } from "@/lib/db/schema/reservas";
 import { salas } from "@/lib/db/schema/salas";
@@ -17,6 +17,25 @@ const MAX_HOLDS_PENDENTES = 30;
 export interface SalaLivre {
   id: string;
   nome: string;
+}
+
+/**
+ * Ordena salas livres pela preferência de mesa e depois pela prioridade de alocação.
+ * - precisaMesa === true  → salas COM mesa primeiro;
+ * - precisaMesa === false → salas SEM mesa primeiro (ex.: psicólogo → Sala 02);
+ * - precisaMesa undefined  → só prioridade.
+ * Nunca bloqueia: a sala "errada" fica no fim, mas segue elegível se for a única livre.
+ */
+export function ordenarSalasPorPreferencia<T extends { prioridade: number | null; tem_mesa: boolean }>(
+  livres: T[],
+  precisaMesa?: boolean
+): T[] {
+  const pref = (s: T): number => {
+    if (precisaMesa === true) return s.tem_mesa ? 0 : 1;
+    if (precisaMesa === false) return s.tem_mesa ? 1 : 0;
+    return 0;
+  };
+  return [...livres].sort((a, b) => pref(a) - pref(b) || (a.prioridade ?? 99) - (b.prioridade ?? 99));
 }
 
 function janelaSanitizada(data: string, hora: string, duracaoMin: number): string | null {
@@ -96,6 +115,7 @@ export async function agendarReservaAgente(input: {
   finalidade?: string;
   salaId?: string;
   valor?: number;
+  precisaMesa?: boolean;
 }): Promise<AgendamentoOk | { erro: string }> {
   const { clienteId, data, hora, duracaoMin, finalidade, valor } = input;
   const invalido = janelaSanitizada(data, hora, duracaoMin);
@@ -106,11 +126,48 @@ export async function agendarReservaAgente(input: {
 
   // Cliente precisa existir e estar ativo.
   const [cli] = await db
-    .select({ id: clientes.id, bloqueado: clientes.bloqueado })
+    .select({
+      id: clientes.id,
+      bloqueado: clientes.bloqueado,
+      status: clientes.status_lead,
+      qualificado: clientes.perfil_qualificado_em,
+      aceitou: clientes.aceitou_politica_em,
+    })
     .from(clientes)
     .where(and(eq(clientes.id, clienteId), eq(clientes.is_deleted, false)));
   if (!cli) return { erro: "Cliente não encontrado." };
   if (cli.bloqueado) return { erro: "Cliente bloqueado — encaminhe para a equipe." };
+
+  // Onboarding obrigatório do cliente NOVO antes de reservar: qualificação de perfil
+  // (maca/pessoas) + aceite da política. Recorrente (já é "cliente" ou tem reserva
+  // confirmada/concluída) pula essas travas — ele já passou por isso antes.
+  const [passada] = await db
+    .select({ id: reservas.id })
+    .from(reservas)
+    .where(
+      and(
+        eq(reservas.cliente_id, clienteId),
+        eq(reservas.is_deleted, false),
+        inArray(reservas.status_reserva, ["confirmada", "concluida"])
+      )
+    )
+    .limit(1);
+  const recorrente = cli.status === "cliente" || Boolean(passada);
+  if (!recorrente) {
+    if (cli.status === "fora_perfil") {
+      return { erro: "Cliente fora do perfil (maca/procedimento ou grupo acima de 3) — não agende; explique com gentileza." };
+    }
+    if (!cli.qualificado) {
+      return {
+        erro: "Antes de agendar para cliente novo, registre a qualificação com a ferramenta qualificar_cliente (tipo de uso, nº de pessoas e se precisa de maca/procedimento).",
+      };
+    }
+    if (!cli.aceitou) {
+      return {
+        erro: "Antes de agendar, o cliente novo precisa aceitar a política: envie o formulário de cadastro e registre o aceite com a ferramenta aceitar_politica.",
+      };
+    }
+  }
 
   try {
     const reserva = await db.transaction(async (tx) => {
@@ -163,7 +220,7 @@ export async function agendarReservaAgente(input: {
 
       // Salas ativas livres na janela (constraint GiST é o backstop final).
       const ativas = await tx
-        .select({ id: salas.id, nome: salas.nome, prioridade: salas.prioridade_alocacao })
+        .select({ id: salas.id, nome: salas.nome, prioridade: salas.prioridade_alocacao, tem_mesa: salas.tem_mesa })
         .from(salas)
         .where(and(eq(salas.is_deleted, false), eq(salas.ativa, true)));
       const ocupadas = await tx
@@ -178,9 +235,12 @@ export async function agendarReservaAgente(input: {
           )
         );
       const ocupado = new Set(ocupadas.map((o) => o.sala_id));
-      const livres = ativas
-        .filter((s) => !ocupado.has(s.id))
-        .sort((a, b) => (a.prioridade ?? 99) - (b.prioridade ?? 99));
+      // Roteamento por mesa: quem precisa de mesa → sala com mesa; quem não precisa
+      // (ex.: psicólogo) → sala sem mesa (Sala 02). Prioridade de alocação como desempate.
+      const livres = ordenarSalasPorPreferencia(
+        ativas.filter((s) => !ocupado.has(s.id)),
+        input.precisaMesa
+      );
 
       // Se pediram uma sala específica, respeita (se livre); senão pega a 1ª por prioridade.
       const escolhida = input.salaId ? livres.find((s) => s.id === input.salaId) : livres[0];

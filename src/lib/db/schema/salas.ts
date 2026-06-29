@@ -28,6 +28,9 @@ export const salas = pgTable(
     reservavel_publicamente: boolean("reservavel_publicamente").notNull().default(true),
     prioridade_alocacao: integer("prioridade_alocacao").notNull().default(0),
     so_sob_pedido: boolean("so_sob_pedido").notNull().default(false),
+    // Tem mesa/escrivaninha? Roteamento: psicólogo (terapia de conversa) vai p/ sala
+    // SEM mesa; quem precisa de apoio p/ notebook vai p/ sala COM mesa.
+    tem_mesa: boolean("tem_mesa").notNull().default(true),
     preco_hora: numeric("preco_hora", { precision: 12, scale: 2 }),
     endereco_fisico: text("endereco_fisico"),
 
