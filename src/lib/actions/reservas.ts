@@ -297,6 +297,11 @@ async function transicionarReserva(
     registroId: id,
     detalhes: `Check-in: ${rotulo}`,
   });
+
+  // Reflete no Google Calendar: concluída cria/atualiza o evento; no_show remove.
+  if (novoStatus === "concluida") await sincronizarReserva(id).catch(() => undefined);
+  else await removerEventoReserva(id).catch(() => undefined);
+
   revalidatePath("/reservas");
   revalidatePath("/reservas/presenca");
   revalidatePath("/clientes");
