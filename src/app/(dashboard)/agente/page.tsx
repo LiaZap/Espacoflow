@@ -52,6 +52,10 @@ export default async function AgentePage() {
               <CardDescription>
                 Converse com a Hígia aqui, sem precisar de WhatsApp nem do número do cliente. Usa o prompt,
                 o modelo e a base de conhecimento reais — não grava no banco nem envia mensagens.
+                <br />
+                <strong>Só conversa:</strong> aqui ela NÃO agenda, não confirma pagamento e não sincroniza
+                no Google. Para testar o fluxo completo (reserva + comprovante + agenda), use o Simulador em
+                Configurações → WhatsApp, ou o WhatsApp real.
               </CardDescription>
             </CardHeader>
             <CardContent>
