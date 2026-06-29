@@ -37,10 +37,24 @@ export async function montarPromptHigia(opts?: {
 
   const persona = config?.prompt_sistema?.trim() || PROMPT_BASE_HIGIA;
 
+  // 2h/4h NÃO são pacote (são avulsa por dia). Relabela mesmo que a tabela traga
+  // rótulo antigo, para a Hígia nunca apresentar isso como "pacote".
+  const rotularPreco = (desc: string, uni: string): { desc: string; uni: string } => {
+    const t = desc.trim();
+    if (/pacote\s*(de\s*)?2\s*h|^2\s*horas?/i.test(t)) return { desc: "2 horas", uni: "no dia" };
+    if (/pacote\s*(de\s*)?4\s*h|meia di[áa]ria|per[íi]odo de 4/i.test(t))
+      return { desc: "Período de 4h (meia diária)", uni: "no dia" };
+    return { desc: t, uni };
+  };
   const precosTxt =
     precos.length > 0
-      ? precos
-          .map((p, i) => `${i + 1}. ${p.descricao}: ${formatarBRL(Math.round(Number(p.valor) * 100))} / ${p.unidade}`)
+      ? "Avulsa com desconto progressivo no MESMO dia (use a ferramenta calcular_preco para o total). " +
+        "Pacotes de SALDO são só 10h/20h/40h. NUNCA chame 2h/4h de \"pacote\".\n" +
+        precos
+          .map((p) => {
+            const r = rotularPreco(p.descricao, p.unidade ?? "");
+            return `- ${r.desc}: ${formatarBRL(Math.round(Number(p.valor) * 100))}${r.uni ? ` / ${r.uni}` : ""}`;
+          })
           .join("\n")
       : "(consultar base atualizada antes de informar)";
 

@@ -16,6 +16,9 @@ export function limparTextoHigia(texto: string): string {
   return texto
     .replace(/\*{2,}/g, "*") // **negrito** → *negrito*
     .replace(/_{2,}/g, "_")
+    // 2h/4h NÃO são "pacote" (são avulsa com desconto). Não toca em 10h/20h/40h.
+    .replace(/\bpacote\s*(?:de\s*)?2\s*h(?:oras?)?\b/gi, "2 horas")
+    .replace(/\bpacote\s*(?:de\s*)?4\s*h(?:oras?)?\b/gi, "meia diária")
     .replace(/\s*[—–]\s*/g, ", ") // travessão / en-dash → vírgula
     .replace(/ +- +/g, ", ") // " - " conector → vírgula
     .replace(/[ \t]{2,}/g, " ")
