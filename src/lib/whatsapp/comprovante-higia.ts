@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pagamentos } from "@/lib/db/schema/pagamentos";
 import { reservas } from "@/lib/db/schema/reservas";
@@ -136,7 +136,34 @@ export async function processarComprovanteHigia(params: {
       )
     )
     .orderBy(desc(pagamentos.created_at));
-  if (pendentes.length === 0) return { tratou: false }; // nada aguardando Pix → não é o fluxo
+  if (pendentes.length === 0) {
+    // Sem pagamento pendente. Se o cliente acabou de pagar e REENVIOU o print (caso
+    // comum), responde idempotente em vez de deixar o LLM/guardrail pedir o comprovante
+    // de novo a quem já foi confirmado.
+    const corte2h = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const [confirmadoRecente] = await db
+      .select({ id: pagamentos.id })
+      .from(pagamentos)
+      .where(
+        and(
+          eq(pagamentos.cliente_id, params.clienteId),
+          eq(pagamentos.is_deleted, false),
+          eq(pagamentos.status, "confirmado"),
+          isNotNull(pagamentos.reserva_id),
+          gt(pagamentos.validado_em, corte2h)
+        )
+      )
+      .limit(1);
+    if (confirmadoRecente) {
+      const enviada = await responder(
+        params.conversaId,
+        params.telefone,
+        "Seu pagamento já está confirmado ✅ Tá tudo certo, pode ficar tranquila(o). Te espero no horário combinado 🙌"
+      );
+      return { tratou: true, enviada, confirmada: true };
+    }
+    return { tratou: false }; // nada aguardando Pix → não é o fluxo
+  }
 
   const ids = pendentes.map((p) => p.id);
   const reservaIds = pendentes.map((p) => p.reserva_id).filter((x): x is string => Boolean(x));
@@ -195,7 +222,38 @@ export async function processarComprovanteHigia(params: {
     })
     .where(inArray(pagamentos.id, ids));
 
-  // ===== Confirma DIRETO o lote inteiro (decisão do espaço; sem etapa da equipe). =====
+  // Só confirma reservas ainda VIVAS (pendente/rascunho). Sem este filtro, um comprovante
+  // que chega depois de a reserva ser cancelada a "ressuscitaria" para confirmada — e, se
+  // o horário já foi re-reservado, colidiria com a constraint de overbooking, derrubando
+  // a transação inteira.
+  const vivas = reservaIds.length
+    ? await db
+        .select({ id: reservas.id })
+        .from(reservas)
+        .where(and(inArray(reservas.id, reservaIds), inArray(reservas.status_reserva, ["pendente", "rascunho"])))
+    : [];
+  const reservaIdsOk = vivas.map((v) => v.id);
+  const idsOk = pendentes.filter((p) => p.reserva_id && reservaIdsOk.includes(p.reserva_id)).map((p) => p.id);
+
+  if (reservaIdsOk.length === 0) {
+    // Comprovante sem reserva ativa correspondente (cancelada/expirada) — não confirma às
+    // cegas nem promete "garantida"; registra para a equipe verificar.
+    await registrarAuditoria({
+      acao: "validar_pix",
+      entidade: "pagamentos",
+      registroId: ids[0],
+      severidade: "warn",
+      detalhes: "Comprovante recebido, mas a(s) reserva(s) vinculada(s) não estão mais ativas (canceladas/expiradas) — verificar manualmente.",
+    }).catch(() => undefined);
+    const enviada = await responder(
+      params.conversaId,
+      params.telefone,
+      "Recebi seu comprovante 🙏 Preciso confirmar um detalhe da sua reserva com a equipe e já te retorno por aqui, tá?"
+    );
+    return { tratou: true, enviada, confirmada: false };
+  }
+
+  // ===== Confirma DIRETO o lote ainda válido (decisão do espaço; sem etapa da equipe). =====
   await db.transaction(async (tx) => {
     await tx
       .update(pagamentos)
@@ -207,13 +265,11 @@ export async function processarComprovanteHigia(params: {
         // validado_por null = confirmado automaticamente pela Hígia (decisão do espaço).
         updated_at: new Date(),
       })
-      .where(inArray(pagamentos.id, ids));
-    if (reservaIds.length) {
-      await tx
-        .update(reservas)
-        .set({ status_pagamento: "pago", status_reserva: "confirmada", updated_at: new Date() })
-        .where(inArray(reservas.id, reservaIds));
-    }
+      .where(inArray(pagamentos.id, idsOk));
+    await tx
+      .update(reservas)
+      .set({ status_pagamento: "pago", status_reserva: "confirmada", updated_at: new Date() })
+      .where(inArray(reservas.id, reservaIdsOk));
     // Promove a "cliente" após a 1ª reserva confirmada — só se já houve aceite da
     // política (cadastro). Garante "cadastro + aceite ANTES da mudança de status".
     await tx
@@ -232,16 +288,16 @@ export async function processarComprovanteHigia(params: {
   await registrarAuditoria({
     acao: "validar_pix",
     entidade: "pagamentos",
-    registroId: ids[0],
+    registroId: idsOk[0],
     severidade: confere ? "info" : "warn",
-    detalhes: `Confirmado direto após comprovante (decisão do espaço): ${reservaIds.length} reserva(s). ${
+    detalhes: `Confirmado direto após comprovante (decisão do espaço): ${reservaIdsOk.length} reserva(s). ${
       confere ? `Leitura confere: ${leitura ? obsLeitura(leitura) : "—"}` : `DIVERGÊNCIA na leitura: ${motivos.join("; ")}`
     }`,
   }).catch(() => undefined);
 
-  for (const rid of reservaIds) await sincronizarReserva(rid).catch(() => undefined);
+  for (const rid of reservaIdsOk) await sincronizarReserva(rid).catch(() => undefined);
 
-  const n = reservaIds.length;
+  const n = reservaIdsOk.length;
   const msg =
     n > 1
       ? `Pagamento confirmado! ✅ Suas ${n} reservas estão garantidas. Te espero nos horários combinados 🙌`

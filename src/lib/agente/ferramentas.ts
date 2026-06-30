@@ -181,21 +181,30 @@ export async function executarFerramentaAgenda(
     }
 
     if (nome === "agendar_reserva") {
+      const duracaoMin = num(input.duracao_min);
+      let valor = input.valor != null ? num(input.valor) : undefined;
+      if (valor == null) {
+        // Deriva o valor avulso no servidor quando o LLM não envia — sem isso o
+        // pagamento nasce com valor null e TODA leitura de comprovante consta como
+        // "divergente" no painel de inconsistências.
+        const calc = calcularPrecoAvulsa([{ data: str(input.data), horas: duracaoMin / 60 }]);
+        if (calc.total > 0) valor = calc.total;
+      }
       const r = await agendarReservaAgente({
         clienteId: ctx.clienteId,
         data: str(input.data),
         hora: str(input.hora),
-        duracaoMin: num(input.duracao_min),
+        duracaoMin,
         finalidade: input.finalidade ? str(input.finalidade) : undefined,
-        valor: input.valor != null ? num(input.valor) : undefined,
+        valor,
         precisaMesa: input.precisa_mesa != null ? bool(input.precisa_mesa) : undefined,
       });
       if ("erro" in r) return JSON.stringify({ ok: false, motivo: r.erro });
       return JSON.stringify({
         ok: true,
-        reserva_provisoria: { sala: r.salaNome, data: r.data, hora: r.hora, duracao_min: r.duracaoMin },
+        reserva: { sala: r.salaNome, data: r.data, hora: r.hora, duracao_min: r.duracaoMin },
         proximo_passo:
-          "Horário segurado (provisório). Depois de agendar TODAS as sessões pedidas, envie o Pix (marcador [PIX]) e peça o comprovante aqui. Quando o comprovante chegar, o sistema confirma tudo automaticamente — não diga que a equipe confirma nem que já está pago.",
+          "Horário SEGURADO. Diga ao cliente que você já segurou o horário dele (NÃO use a palavra 'provisória'). Depois de agendar TODAS as sessões pedidas, envie o Pix (marcador [PIX]) e peça o comprovante aqui. Quando o comprovante chegar, o sistema confirma tudo automaticamente — não diga que a equipe confirma nem que já está pago.",
       });
     }
 

@@ -94,7 +94,7 @@ Você pode AGENDAR sozinha, sem passar para um humano. Para CLIENTE NOVO, use as
 2) Mostre as fotos das salas ([FOTO: identificador]) e informe o VALOR com "calcular_preco" (TODAS as sessões; soma POR DIA, dias nunca se misturam; nunca cite "pacote" para avulsa).
 3) "consultar_disponibilidade" (data AAAA-MM-DD, hora HH:MM, duração em min) e combine o horário com o cliente. Pode checar disponibilidade e informar preço SEM aceite — não peça cadastro antes disso.
 4) "aceitar_politica" — SÓ depois de o cliente topar o horário: mande o link do cadastro UMA vez e, quando ele confirmar que aceita, registre. NÃO reenvie o link nem fique repetindo.
-5) "agendar_reserva" — UMA VEZ POR SESSÃO, preenchendo precisa_mesa (true se precisa de mesa/apoio p/ notebook; false para psicólogo de conversa → Sala 02 sem mesa). Ficam PROVISÓRIAS.
+5) "agendar_reserva" — UMA VEZ POR SESSÃO, preenchendo precisa_mesa (true se precisa de mesa/apoio p/ notebook; false para psicólogo de conversa → Sala 02 sem mesa). Internamente ficam provisórias até o Pix; ao cliente, diga "já segurei o seu horário" — NUNCA use a palavra "provisória".
 6) Depois de agendar TODAS, envie o Pix ([PIX]) e PEÇA o comprovante aqui. Diga que assim que ele chegar as reservas ficam garantidas. NÃO afirme você mesma que está pago — o sistema confirma TUDO e avisa o cliente.
 CLIENTE RECORRENTE ("Cliente recorrente: sim" na memória): PULE os passos 1 e 4 — já foi qualificado e já aceitou a política. Vá direto à disponibilidade e à reserva.
 Se algum horário estiver indisponível ou der erro, ofereça outro — não force; agende os que der.
@@ -126,7 +126,7 @@ async function blocoMidia(): Promise<string> {
 
   return `\n\n<midia_disponivel>
 Você pode ENVIAR estas fotos/arquivos pelo WhatsApp. Para enviar um, escreva o marcador EXATAMENTE assim, sozinho numa linha: [FOTO: identificador]. Pode enviar vários (um marcador por linha).
-Envie no MÁXIMO 3 fotos por vez, priorizando a sala mais adequada ao cliente — NUNCA mande todas de uma vez. Com cliente novo, mostre 2–3 fotos durante o atendimento, de forma natural (não anuncie que vai mandar).
+Envie no MÁXIMO 3 fotos por vez, priorizando a sala mais adequada — NUNCA mande todas de uma vez. Com cliente novo, mostre fotos só DEPOIS de qualificar (aprovado no perfil), ao apresentar o espaço/valores. Use SOMENTE os identificadores exatos listados abaixo; se não houver foto da sala ideal, descreva em texto e não prometa imagem que não existe.
 NUNCA escreva a palavra "marcador", não cite o identificador em voz alta e não anuncie que vai mandar foto — apenas inclua o marcador e siga a conversa naturalmente.
 Disponíveis (identificador: descrição):
 ${linhas.join("\n")}
