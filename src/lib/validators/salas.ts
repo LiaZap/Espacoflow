@@ -5,6 +5,7 @@ export const salaSchema = z.object({
   tipo: z.string().trim().default("privativa"),
   capacidade: z.coerce.number().int().min(1).max(20).default(1),
   descricao: z.string().trim().optional(),
+  codigo_acesso: z.string().trim().optional(),
   prioridade_alocacao: z.coerce.number().int().min(0).default(0),
   preco_hora: z.preprocess(
     (v) => (v === "" || v == null ? undefined : v),

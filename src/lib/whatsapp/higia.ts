@@ -293,10 +293,10 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     }
     const tipo = tipoWhatsapp(m.tipo_arquivo);
     const url = urlMidiaAbsoluta(m.arquivo_url);
-    // Fotos das salas vão SEM legenda ao cliente (decisão do espaço: "só manda as fotos,
-    // sem identificação" — o rótulo causava confusão). PDFs/documentos mantêm o rótulo.
+    // Foto vai com a IDENTIFICAÇÃO curta da sala (ex.: "Sala 01") — o cliente precisa
+    // saber qual é qual pra escolher. Usa o NOME (não a descrição longa, que confundia).
     const ehFoto = tipo === "image";
-    const legenda = ehFoto ? undefined : m.descricao || m.nome;
+    const legenda = ehFoto ? m.nome : m.descricao || m.nome;
     await provider.definirPresenca(telefone, "composing").catch(() => undefined);
     const envio = await provider.enviarMidia(telefone, {
       tipo,

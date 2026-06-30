@@ -42,6 +42,7 @@ export async function salvarSala(_prev: FormState, formData: FormData): Promise<
     tipo: d.tipo,
     capacidade: d.capacidade,
     descricao: d.descricao ?? null,
+    codigo_acesso: d.codigo_acesso ?? null,
     prioridade_alocacao: d.prioridade_alocacao,
     preco_hora: d.preco_hora != null ? String(d.preco_hora) : null,
     ativa: formData.get("ativa") !== "false",

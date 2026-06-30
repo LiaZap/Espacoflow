@@ -41,3 +41,23 @@ export function formatarHora(data: Date | string): string {
     minute: "2-digit",
   });
 }
+
+/** Data de calendário "2026-06-30" -> "30/06/26" (sem fuso; usa a string da reserva). */
+export function formatarDataCurta(dataIso: string): string {
+  const [y, m, d] = dataIso.split("-");
+  if (!y || !m || !d) return dataIso;
+  return `${d}/${m}/${y.slice(2)}`;
+}
+
+/** Hora curta no fuso America/Sao_Paulo: "15h" (em ponto) ou "15h30". */
+export function formatarHoraCurta(data: Date | string): string {
+  const d = typeof data === "string" ? new Date(data) : data;
+  const hhmm = d.toLocaleTimeString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const [h, min] = hhmm.split(":");
+  return min === "00" ? `${h}h` : `${h}h${min}`;
+}

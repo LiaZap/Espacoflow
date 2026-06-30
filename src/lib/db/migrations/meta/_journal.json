@@ -71,6 +71,13 @@
       "when": 1782750734772,
       "tag": "0009_uat_r03_onboarding_salas",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1782843862378,
+      "tag": "0010_r04_onboarding_msg_acesso",
+      "breakpoints": true
     }
   ]
 }

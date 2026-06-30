@@ -42,6 +42,10 @@ export const agenteConfig = pgTable("agente_config", {
   pix_copia_cola: text("pix_copia_cola"),
   pix_instrucoes: text("pix_instrucoes"),
 
+  // Mensagem de boas-vindas/onboarding enviada ao cliente APÓS a reserva confirmada.
+  // Placeholders: {{SALA}} (nome da sala) e {{ACESSO}} (instrução de acesso da sala).
+  msg_boas_vindas: text("msg_boas_vindas"),
+
   created_at: timestamp("created_at").notNull().defaultNow(),
   updated_at: timestamp("updated_at").notNull().defaultNow(),
   deleted_at: timestamp("deleted_at"),

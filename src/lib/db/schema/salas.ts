@@ -33,6 +33,10 @@ export const salas = pgTable(
     tem_mesa: boolean("tem_mesa").notNull().default(true),
     preco_hora: numeric("preco_hora", { precision: 12, scale: 2 }),
     endereco_fisico: text("endereco_fisico"),
+    // Instrução de acesso da sala (sala física + senha da fechadura), enviada no
+    // onboarding pós-reserva. Ex.: "Ao chegar na sala 135, pressione a fechadura 2s e
+    // digite a senha 0135#". Editável pela equipe.
+    codigo_acesso: text("codigo_acesso"),
 
     created_at: timestamp("created_at").notNull().defaultNow(),
     updated_at: timestamp("updated_at").notNull().defaultNow(),

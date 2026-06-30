@@ -15,6 +15,7 @@ import {
   PRECOS_SEED,
   BASE_CONHECIMENTO_SEED,
   POLITICA_CANCELAMENTO_SEED,
+  MSG_BOAS_VINDAS_SEED,
 } from "./seed-data";
 
 /** Seed idempotente: roda quantas vezes quiser sem duplicar dados. */
@@ -81,9 +82,16 @@ async function main() {
     await db.insert(agenteConfig).values({
       hora_inicio: "07:00:00",
       hora_fim: "23:00:00",
+      msg_boas_vindas: MSG_BOAS_VINDAS_SEED,
       modified_by: ownerId,
     });
     console.log("✓ config da Hígia criada");
+  } else if (!cfg[0].msg_boas_vindas) {
+    // Config já existe mas sem a mensagem de boas-vindas (instalação anterior à R04).
+    await db
+      .update(agenteConfig)
+      .set({ msg_boas_vindas: MSG_BOAS_VINDAS_SEED, updated_at: new Date() })
+      .where(eq(agenteConfig.id, cfg[0].id));
   }
 
   // --- Preços da Hígia ---

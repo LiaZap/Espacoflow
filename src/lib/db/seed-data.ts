@@ -12,13 +12,17 @@ export const OWNER_SEED = {
   telefone: "61992499268",
 };
 
+/** Instrução de acesso de exemplo (Felipe ajusta as demais salas no painel). */
+export const ACESSO_EXEMPLO_SALA_01 =
+  "Ao chegar na sala 135, pressione a fechadura eletrônica por uns 2 segundos (as luzes do painel acendem) e digite a senha: 0135#";
+
 export const SALAS_SEED = [
   // Sala 02 NÃO tem mesa (destino padrão de psicólogo/terapia de conversa). As demais
   // têm mesa de apoio (p/ quem precisa de notebook etc.).
-  { nome: "Sala 01", prioridade_alocacao: 1, tem_mesa: true },
-  { nome: "Sala 02", prioridade_alocacao: 2, tem_mesa: false },
-  { nome: "Sala 03", prioridade_alocacao: 3, tem_mesa: true },
-  { nome: "Sala 04", prioridade_alocacao: 4, tem_mesa: true },
+  { nome: "Sala 01", prioridade_alocacao: 1, tem_mesa: true, codigo_acesso: ACESSO_EXEMPLO_SALA_01 as string | null },
+  { nome: "Sala 02", prioridade_alocacao: 2, tem_mesa: false, codigo_acesso: null as string | null },
+  { nome: "Sala 03", prioridade_alocacao: 3, tem_mesa: true, codigo_acesso: null as string | null },
+  { nome: "Sala 04", prioridade_alocacao: 4, tem_mesa: true, codigo_acesso: null as string | null },
 ].map((s) => ({
   ...s,
   tipo: "privativa",
@@ -80,3 +84,23 @@ export const POLITICA_CANCELAMENTO_SEED = {
   percentual_devolvido: 100,
   validade_credito_dias: 60,
 };
+
+/** Mensagem de boas-vindas/onboarding (pós-reserva confirmada). {{SALA}} e {{ACESSO}}. */
+export const MSG_BOAS_VINDAS_SEED = `*Seja muito bem-vinda(o) ao Espaço Flow!* 🌸
+
+Que alegria ter você aqui! Sua reserva da {{SALA}} está confirmada. Desejamos um atendimento produtivo e tranquilo 🚀
+
+{{ACESSO}}
+
+Obs: use a sala reservada, de porta fechada. Não troque de sala sem a nossa confirmação — ela pode já estar locada. 🙏
+Para abrir a fechadura por dentro, aperte o botão redondinho com o cadeadinho.
+
+💧 Água: filtro na recepção.
+
+Ao sair: desligue o ar-condicionado, deixe o display em LIVRE, apague as luzes e segure a porta fechada por fora uns 3 segundos até a fechadura travar 🙌
+
+📶 Internet
+3G — rede internetFlow3g, senha 1234flow
+5G — rede flowcoworking, senha 1234flow
+
+📍 Localização: https://maps.google.com/?cid=13531186749440921807`;

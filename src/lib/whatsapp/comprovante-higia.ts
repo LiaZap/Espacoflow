@@ -2,6 +2,7 @@ import { and, desc, eq, gt, inArray, isNotNull, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pagamentos } from "@/lib/db/schema/pagamentos";
 import { reservas } from "@/lib/db/schema/reservas";
+import { salas } from "@/lib/db/schema/salas";
 import { clientes } from "@/lib/db/schema/clientes";
 import { agenteConfig } from "@/lib/db/schema/agente";
 import { whatsappConversas, whatsappMensagens } from "@/lib/db/schema/whatsapp";
@@ -9,8 +10,10 @@ import { lerComprovante, type LeituraComprovante } from "@/lib/documentos/ler-co
 import { sincronizarReserva } from "@/lib/google/calendar";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { hojeSaoPaulo } from "@/lib/reservas/disponibilidade";
+import { formatarDataCurta, formatarHoraCurta } from "@/lib/utils";
 import { getProvider } from "./provider";
 import { enviarHumanizado } from "./humanizar";
+import { enviarBoasVindas } from "./boas-vindas";
 
 export interface ResultadoComprovante {
   tratou: boolean; // true = era comprovante e nós tratamos (não cai no LLM)
@@ -108,6 +111,48 @@ async function responder(conversaId: string, telefone: string, texto: string): P
     .set({ ultima_mensagem_em: new Date() })
     .where(eq(whatsappConversas.id, conversaId));
   return r.algumOk;
+}
+
+/** Envia UMA mensagem intacta (sem picar) — para blocos formatados (resumo da reserva). */
+async function responderUnico(conversaId: string, telefone: string, texto: string): Promise<boolean> {
+  const provider = getProvider();
+  await provider.definirPresenca(telefone, "composing").catch(() => undefined);
+  const envio = await provider.enviarTexto(telefone, texto);
+  await db.insert(whatsappMensagens).values({
+    conversa_id: conversaId,
+    origem: "higia",
+    tipo: "text",
+    conteudo: texto,
+    status: envio.ok ? "sent" : "failed",
+    processada_por_higia: true,
+    enviada_em: new Date(),
+    id_externo: envio.idExterno ?? null,
+  });
+  await db
+    .update(whatsappConversas)
+    .set({ ultima_mensagem_em: new Date() })
+    .where(eq(whatsappConversas.id, conversaId));
+  return envio.ok;
+}
+
+/** Resumo da reserva no layout do espaço (data, sala, início, término, horas, confirmada). */
+function resumoReservaTexto(d: {
+  data: string;
+  duracao_min: number;
+  inicio_em: Date | null;
+  fim_em: Date | null;
+  sala: string;
+}): string {
+  const horas = d.duracao_min / 60;
+  const lblHoras = horas === 1 ? "1 hora" : `${horas % 1 === 0 ? horas : horas.toFixed(1)} horas`;
+  return [
+    formatarDataCurta(d.data),
+    d.sala,
+    `Início: ${d.inicio_em ? formatarHoraCurta(d.inicio_em) : "—"}`,
+    `Término: ${d.fim_em ? formatarHoraCurta(d.fim_em) : "—"}`,
+    lblHoras,
+    "✅ Reserva confirmada",
+  ].join("\n");
 }
 
 /**
@@ -326,11 +371,33 @@ export async function processarComprovanteHigia(params: {
 
   for (const rid of reservaIdsOk) await sincronizarReserva(rid).catch(() => undefined);
 
-  const n = reservaIdsOk.length;
-  const msg =
-    n > 1
-      ? `Pagamento confirmado! ✅ Suas ${n} reservas estão garantidas. Te espero nos horários combinados 🙌`
-      : "Pagamento confirmado! ✅ Sua reserva está garantida. Te espero no horário combinado 🙌";
-  const enviada = await responder(params.conversaId, params.telefone, msg);
+  // Detalhes das reservas confirmadas (para o resumo formatado e o onboarding).
+  const detalhes = await db
+    .select({
+      id: reservas.id,
+      data: reservas.data,
+      duracao_min: reservas.duracao_min,
+      inicio_em: reservas.inicio_em,
+      fim_em: reservas.fim_em,
+      sala_id: reservas.sala_id,
+      sala: salas.nome,
+    })
+    .from(reservas)
+    .innerJoin(salas, eq(reservas.sala_id, salas.id))
+    .where(inArray(reservas.id, reservaIdsOk));
+
+  // 1) Confirmação (humanizada, natural).
+  const enviada = await responder(params.conversaId, params.telefone, "Pagamento confirmado! ✅");
+  // 2) Resumo formatado de cada reserva (mensagem única, no layout do espaço).
+  for (const d of detalhes) {
+    await responderUnico(params.conversaId, params.telefone, resumoReservaTexto(d));
+  }
+  // 3) Boas-vindas / onboarding com instruções de acesso — uma vez por sala.
+  const salasEnviadas = new Set<string>();
+  for (const d of detalhes) {
+    if (salasEnviadas.has(d.sala_id)) continue;
+    salasEnviadas.add(d.sala_id);
+    await enviarBoasVindas(d.id, params.conversaId, params.telefone);
+  }
   return { tratou: true, enviada, confirmada: true };
 }

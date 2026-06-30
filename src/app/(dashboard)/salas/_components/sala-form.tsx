@@ -74,6 +74,14 @@ export function SalaForm({ sala }: { sala?: Sala }) {
         <Textarea name="descricao" defaultValue={sala?.descricao ?? ""} />
       </Campo>
 
+      <Campo label="Instruções de acesso (enviadas no onboarding após a reserva confirmada)">
+        <Textarea
+          name="codigo_acesso"
+          defaultValue={sala?.codigo_acesso ?? ""}
+          placeholder="Ex.: Ao chegar na sala 135, pressione a fechadura 2s e digite a senha: 0135#"
+        />
+      </Campo>
+
       {state?.erro ? (
         <p className="text-sm text-destructive" role="alert">
           {state.erro}
