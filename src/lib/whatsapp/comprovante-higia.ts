@@ -230,14 +230,27 @@ export async function processarComprovanteHigia(params: {
     ? await db
         .select({ id: reservas.id })
         .from(reservas)
-        .where(and(inArray(reservas.id, reservaIds), inArray(reservas.status_reserva, ["pendente", "rascunho"])))
+        .where(
+          and(
+            inArray(reservas.id, reservaIds),
+            eq(reservas.is_deleted, false),
+            inArray(reservas.status_reserva, ["pendente", "rascunho"])
+          )
+        )
     : [];
   const reservaIdsOk = vivas.map((v) => v.id);
   const idsOk = pendentes.filter((p) => p.reserva_id && reservaIdsOk.includes(p.reserva_id)).map((p) => p.id);
+  // Pagamentos do MESMO comprovante cuja reserva não está mais ativa (lote misto):
+  // não somem em silêncio — vão para em_análise + auditoria (a equipe verifica).
+  const idsMortos = ids.filter((id) => !idsOk.includes(id));
 
   if (reservaIdsOk.length === 0) {
     // Comprovante sem reserva ativa correspondente (cancelada/expirada) — não confirma às
-    // cegas nem promete "garantida"; registra para a equipe verificar.
+    // cegas nem promete "garantida"; manda para em_análise e registra para a equipe.
+    await db
+      .update(pagamentos)
+      .set({ status: "em_analise", updated_at: new Date() })
+      .where(inArray(pagamentos.id, ids));
     await registrarAuditoria({
       acao: "validar_pix",
       entidade: "pagamentos",
@@ -270,6 +283,12 @@ export async function processarComprovanteHigia(params: {
       .update(reservas)
       .set({ status_pagamento: "pago", status_reserva: "confirmada", updated_at: new Date() })
       .where(inArray(reservas.id, reservaIdsOk));
+    if (idsMortos.length) {
+      await tx
+        .update(pagamentos)
+        .set({ status: "em_analise", updated_at: new Date() })
+        .where(inArray(pagamentos.id, idsMortos));
+    }
     // Promove a "cliente" após a 1ª reserva confirmada — só se já houve aceite da
     // política (cadastro). Garante "cadastro + aceite ANTES da mudança de status".
     await tx
@@ -294,6 +313,16 @@ export async function processarComprovanteHigia(params: {
       confere ? `Leitura confere: ${leitura ? obsLeitura(leitura) : "—"}` : `DIVERGÊNCIA na leitura: ${motivos.join("; ")}`
     }`,
   }).catch(() => undefined);
+
+  if (idsMortos.length) {
+    await registrarAuditoria({
+      acao: "validar_pix",
+      entidade: "pagamentos",
+      registroId: idsMortos[0],
+      severidade: "warn",
+      detalhes: `Comprovante cobre ${idsMortos.length} pagamento(s) de reserva(s) que não estão mais ativas — marcados em análise para a equipe verificar.`,
+    }).catch(() => undefined);
+  }
 
   for (const rid of reservaIdsOk) await sincronizarReserva(rid).catch(() => undefined);
 

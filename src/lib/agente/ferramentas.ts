@@ -183,7 +183,7 @@ export async function executarFerramentaAgenda(
     if (nome === "agendar_reserva") {
       const duracaoMin = num(input.duracao_min);
       let valor = input.valor != null ? num(input.valor) : undefined;
-      if (valor == null) {
+      if (valor == null || valor <= 0) {
         // Deriva o valor avulso no servidor quando o LLM não envia — sem isso o
         // pagamento nasce com valor null e TODA leitura de comprovante consta como
         // "divergente" no painel de inconsistências.

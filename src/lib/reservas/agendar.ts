@@ -104,8 +104,9 @@ export interface AgendamentoOk {
 
 /**
  * Cria uma reserva PROVISÓRIA (hold) para o cliente da conversa — pendente de
- * pagamento via Pix. NÃO confirma pagamento nem debita pacote: quem confirma é a
- * equipe, após o comprovante. O `clienteId` vem do servidor (nunca do LLM).
+ * pagamento via Pix. NÃO confirma pagamento nem debita pacote aqui: a confirmação é
+ * automática quando o comprovante chega (processarComprovanteHigia). O `clienteId`
+ * vem do servidor (nunca do LLM).
  */
 export async function agendarReservaAgente(input: {
   clienteId: string;
