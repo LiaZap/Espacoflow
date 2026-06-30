@@ -16,6 +16,7 @@ import { exigirSessao } from "@/lib/auth";
 import { temPapel } from "@/lib/auth/rbac";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { removerEventoReserva } from "@/lib/google/calendar";
+import { lerCadastros, cadastroSheetConfigurado } from "@/lib/google/cadastro-sheet";
 
 function soft() {
   return { is_deleted: true, deleted_at: new Date(), updated_at: new Date() };
@@ -97,4 +98,77 @@ export async function limparDadosTesteWhatsapp(): Promise<{ erro?: string; ok?: 
   revalidatePath("/reservas");
   revalidatePath("/pagamentos");
   return { ok: true, total: ids.length };
+}
+
+/**
+ * Importa os clientes da planilha de respostas do formulário (mesma do cadastro) como
+ * RECORRENTES (status "cliente" + aceite), casando/criando por telefone no formato do
+ * WhatsApp. Idempotente (re-rodar atualiza). Apenas owner/super_admin.
+ */
+export async function importarCadastrosFormulario(): Promise<{
+  erro?: string;
+  ok?: boolean;
+  total?: number;
+  criados?: number;
+  atualizados?: number;
+}> {
+  const sessao = await exigirSessao();
+  if (!temPapel(sessao.role, "owner")) {
+    return { erro: "Apenas o proprietário (owner) pode importar cadastros." };
+  }
+  if (!cadastroSheetConfigurado()) {
+    return { erro: "Planilha de cadastro não configurada (defina GOOGLE_CADASTRO_SHEET_ID)." };
+  }
+
+  const cadastros = await lerCadastros();
+  if (cadastros.length === 0) {
+    return { erro: "Não consegui ler a planilha — confira a conexão do Google (reconectar) e o acesso à planilha." };
+  }
+
+  let criados = 0;
+  let atualizados = 0;
+  for (const c of cadastros) {
+    // Inclui soft-deletado na busca para respeitar o UNIQUE(telefone).
+    const [existente] = await db.select().from(clientes).where(eq(clientes.telefone, c.telefone));
+    if (existente) {
+      await db
+        .update(clientes)
+        .set({
+          status_lead: "cliente",
+          is_deleted: false,
+          deleted_at: null,
+          ...(c.aceitou && !existente.aceitou_politica_em ? { aceitou_politica_em: new Date() } : {}),
+          ...(!existente.profissao && c.profissao ? { profissao: c.profissao } : {}),
+          ...(!existente.email && c.email ? { email: c.email } : {}),
+          ...(!existente.documento && c.documento ? { documento: c.documento } : {}),
+          ...((!existente.nome || existente.nome === existente.telefone) && c.nome ? { nome: c.nome } : {}),
+          updated_at: new Date(),
+          modified_by: sessao.userId,
+        })
+        .where(eq(clientes.id, existente.id));
+      atualizados++;
+    } else {
+      await db.insert(clientes).values({
+        nome: c.nome,
+        telefone: c.telefone,
+        email: c.email,
+        documento: c.documento,
+        profissao: c.profissao,
+        status_lead: "cliente",
+        origem: "importado",
+        aceitou_politica_em: c.aceitou ? new Date() : null,
+        modified_by: sessao.userId,
+      });
+      criados++;
+    }
+  }
+
+  await registrarAuditoria({
+    userId: sessao.userId,
+    acao: "criar",
+    entidade: "clientes",
+    detalhes: `Importou cadastros do formulário: ${criados} novo(s), ${atualizados} atualizado(s) (total ${cadastros.length}).`,
+  });
+  revalidatePath("/clientes");
+  return { ok: true, total: cadastros.length, criados, atualizados };
 }

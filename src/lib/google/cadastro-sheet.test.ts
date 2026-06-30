@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolverColunas, telefoneCasa, ehAceite } from "./cadastro-sheet";
+import { resolverColunas, telefoneCasa, ehAceite, normalizarTelefoneBR } from "./cadastro-sheet";
 
 // Cabeçalho REAL da planilha de respostas do Felipe (UAT R04).
 const HEADER = [
@@ -26,11 +26,23 @@ const HEADER = [
 ];
 
 describe("planilha de cadastro: mapeamento de colunas", () => {
-  it("acha telefone, nome e aceite nas colunas certas do cabeçalho real", () => {
-    const { iTel, iNome, iAceite } = resolverColunas(HEADER);
+  it("acha telefone, nome, aceite, email, profissão e documento no cabeçalho real", () => {
+    const { iTel, iNome, iAceite, iEmail, iProfissao, iDocumento } = resolverColunas(HEADER);
     expect(iTel).toBe(7); // "Telefone de Contato com DDD"
     expect(iNome).toBe(1); // "Nome completo" (não "Razão social e nome fantasia")
     expect(iAceite).toBe(15); // "Está de acordo com a política de uso?" (não "Frequência de uso")
+    expect(iEmail).toBe(6); // "E-mail"
+    expect(iProfissao).toBe(5); // "Profissão ou área de atuação"
+    expect(iDocumento).toBe(3); // "Documento de identificação (CPF ou outros)"
+  });
+});
+
+describe("normalizarTelefoneBR (formato gravado pela ingestão: DDI 55 + dígitos)", () => {
+  it("acrescenta o DDI quando falta e mantém quando já tem", () => {
+    expect(normalizarTelefoneBR("(11) 98992-2411")).toBe("5511989922411");
+    expect(normalizarTelefoneBR("11989922411")).toBe("5511989922411");
+    expect(normalizarTelefoneBR("+55 11 98992 2411")).toBe("5511989922411");
+    expect(normalizarTelefoneBR("5511989922411")).toBe("5511989922411");
   });
 });
 

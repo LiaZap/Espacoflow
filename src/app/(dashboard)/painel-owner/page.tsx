@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { formatarDataHora } from "@/lib/utils";
 import { LimparTeste } from "./_components/limpar-teste";
+import { ImportarCadastros } from "./_components/importar-cadastros";
 
 const SEV_VARIANTE: Record<string, "secondary" | "warning" | "destructive"> = {
   info: "secondary",
@@ -23,7 +24,14 @@ export default async function PainelOwnerPage() {
       <PageHeader
         titulo="Painel Owner"
         descricao="Trilha de auditoria: quem fez o quê e quando. Inclui exclusões e acessos negados."
-        acao={podeLimpar ? <LimparTeste /> : undefined}
+        acao={
+          podeLimpar ? (
+            <div className="flex flex-wrap gap-2">
+              <ImportarCadastros />
+              <LimparTeste />
+            </div>
+          ) : undefined
+        }
       />
 
       <div className="grid gap-4 sm:grid-cols-3">

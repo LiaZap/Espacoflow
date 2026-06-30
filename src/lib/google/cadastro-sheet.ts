@@ -46,14 +46,66 @@ function acharColuna(header: string[], termos: string[]): number {
 }
 
 /** Resolve os índices das colunas relevantes a partir do cabeçalho do formulário. */
-export function resolverColunas(header: string[]): { iTel: number; iNome: number; iAceite: number } {
+export function resolverColunas(header: string[]): {
+  iTel: number;
+  iNome: number;
+  iAceite: number;
+  iEmail: number;
+  iProfissao: number;
+  iDocumento: number;
+} {
   return {
     iTel: acharColuna(header, ["telefone", "whatsapp", "celular", "telefon", "fone"]),
     iNome: acharColuna(header, ["nome completo", "nome"]),
     // "acordo"/"politica" casa "Está de acordo com a política de uso?". NÃO usar "uso"
     // (casaria "Frequência de uso" / "Telefone ... (Uso frequente)").
     iAceite: acharColuna(header, ["acordo", "politica", "polit", "concord", "aceit", "termo"]),
+    iEmail: acharColuna(header, ["e-mail", "email", "mail"]),
+    iProfissao: acharColuna(header, ["profiss", "area de atuacao", "atuacao"]),
+    iDocumento: acharColuna(header, ["documento", "cpf"]),
   };
+}
+
+/** Normaliza o telefone para o formato gravado pela ingestão do WhatsApp (DDI 55 + dígitos). */
+export function normalizarTelefoneBR(raw: string): string {
+  const d = (raw ?? "").replace(/\D/g, "");
+  if (!d) return "";
+  if (d.startsWith("55") && (d.length === 12 || d.length === 13)) return d; // já tem DDI
+  if (d.length === 10 || d.length === 11) return `55${d}`; // DDD + número, sem DDI
+  return d; // melhor esforço (formatos atípicos)
+}
+
+export interface CadastroImportado {
+  telefone: string;
+  nome: string;
+  email: string | null;
+  profissao: string | null;
+  documento: string | null;
+  aceitou: boolean;
+}
+
+/** Lê TODOS os cadastros da planilha (para importar como clientes recorrentes). */
+export async function lerCadastros(): Promise<CadastroImportado[]> {
+  const dados = await lerRespostas();
+  if (!dados) return [];
+  const { header, linhas } = dados;
+  const c = resolverColunas(header);
+  if (c.iTel < 0) return [];
+
+  const out: CadastroImportado[] = [];
+  for (const row of linhas) {
+    const telefone = normalizarTelefoneBR(row[c.iTel] ?? "");
+    if (telefone.length < 10) continue; // sem telefone válido, não dá para casar
+    out.push({
+      telefone,
+      nome: (c.iNome >= 0 ? row[c.iNome] : "")?.trim() || telefone,
+      email: c.iEmail >= 0 ? row[c.iEmail]?.trim() || null : null,
+      profissao: c.iProfissao >= 0 ? row[c.iProfissao]?.trim() || null : null,
+      documento: c.iDocumento >= 0 ? row[c.iDocumento]?.trim() || null : null,
+      aceitou: c.iAceite >= 0 ? ehAceite(row[c.iAceite] ?? "") : true,
+    });
+  }
+  return out;
 }
 
 interface LinhaCadastro {
