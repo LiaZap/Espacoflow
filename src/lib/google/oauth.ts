@@ -1,11 +1,19 @@
 /**
- * OAuth do Google (Calendar) — fluxo manual (sem dependência googleapis).
+ * OAuth do Google — fluxo manual (sem dependência googleapis).
  * Credenciais do app via env: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET e
- * (opcional) GOOGLE_REDIRECT_URI. Escopo: calendar.events + email.
+ * (opcional) GOOGLE_REDIRECT_URI.
+ * Escopos: calendar.events (agenda) + spreadsheets.readonly (ler respostas do
+ * formulário de cadastro) + email. Ao adicionar o escopo de planilha, é preciso
+ * RECONECTAR a conta uma vez para o token passar a ter acesso.
  */
 import { randomBytes } from "crypto";
 
-const SCOPE = "openid email https://www.googleapis.com/auth/calendar.events";
+const SCOPE = [
+  "openid",
+  "email",
+  "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/spreadsheets.readonly",
+].join(" ");
 
 /** Nome do cookie httpOnly que guarda o `state` anti-CSRF do fluxo OAuth. */
 export const OAUTH_STATE_COOKIE = "g_oauth_state";

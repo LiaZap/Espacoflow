@@ -6,7 +6,7 @@ import {
   cancelarReservaAgente,
   alterarReservaAgente,
 } from "@/lib/reservas/agente-recorrente";
-import { registrarQualificacao, registrarAceitePolitica } from "./onboarding";
+import { registrarQualificacao, registrarAceitePolitica, confirmarCadastroPlanilha } from "./onboarding";
 
 /** Definições das ferramentas (formato tool use da Anthropic) que a Hígia pode chamar. */
 export const FERRAMENTAS_AGENDA = [
@@ -62,6 +62,12 @@ export const FERRAMENTAS_AGENDA = [
       },
       required: ["concordo"],
     },
+  },
+  {
+    name: "confirmar_cadastro",
+    description:
+      "Valida o cadastro do cliente NOVO lendo a planilha do formulário (casa pelo telefone) e registra o aceite da política. Use quando o cliente disser que preencheu o formulário de cadastro. Se não encontrar, peça para ele confirmar o número de WhatsApp usado no formulário.",
+    input_schema: { type: "object", properties: {} },
   },
   {
     name: "consultar_disponibilidade",
@@ -216,6 +222,25 @@ export async function executarFerramentaAgenda(
       const r = await registrarAceitePolitica({ clienteId: ctx.clienteId, concordo: bool(input.concordo) });
       if (!r.ok) return JSON.stringify({ ok: false, motivo: r.mensagem });
       return JSON.stringify({ ok: true, registrado: true, proximo_passo: "Aceite registrado. Pode seguir para a reserva e o Pix." });
+    }
+
+    if (nome === "confirmar_cadastro") {
+      const r = await confirmarCadastroPlanilha(ctx.clienteId);
+      if (r.ok) {
+        return JSON.stringify({
+          ok: true,
+          registrado: true,
+          proximo_passo: "Cadastro e aceite confirmados pela planilha. Pode seguir para a disponibilidade e a reserva.",
+        });
+      }
+      if (r.fallback) {
+        return JSON.stringify({
+          ok: false,
+          motivo: r.mensagem,
+          instrucao: "Não deu pra validar pela planilha agora. Peça ao cliente que confirme o aceite aqui e registre com aceitar_politica.",
+        });
+      }
+      return JSON.stringify({ ok: false, motivo: r.mensagem });
     }
 
     if (nome === "consultar_disponibilidade") {

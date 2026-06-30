@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { clientes, clientesConsentimentos } from "@/lib/db/schema/clientes";
 import { registrarAuditoria } from "@/lib/audit/logger";
+import { verificarCadastro, cadastroSheetConfigurado } from "@/lib/google/cadastro-sheet";
 
 /** Máximo de pessoas por sala (acima disso o cliente está fora do perfil). */
 export const MAX_PESSOAS = 3;
@@ -130,5 +131,52 @@ export async function registrarAceitePolitica(input: {
       detalhes: "Cliente aceitou a política de uso (cadastro via WhatsApp).",
     }).catch(() => undefined);
   }
+  return { ok: true };
+}
+
+/**
+ * Valida o cadastro/aceite do cliente LENDO a planilha de respostas do Google Forms
+ * (casa pelo telefone). Se achar com aceite, registra a política. Se a planilha não
+ * estiver configurada/legível, devolve fallback=true (o caller pede aceite no chat).
+ */
+export async function confirmarCadastroPlanilha(
+  clienteId: string
+): Promise<{ ok: boolean; fallback?: boolean; mensagem?: string }> {
+  const [cli] = await db
+    .select({ tel: clientes.telefone, nome: clientes.nome, aceito: clientes.aceitou_politica_em })
+    .from(clientes)
+    .where(and(eq(clientes.id, clienteId), eq(clientes.is_deleted, false)));
+  if (!cli) return { ok: false, mensagem: "Cliente não encontrado." };
+  if (cli.aceito) return { ok: true }; // já aceitou antes
+
+  if (!cadastroSheetConfigurado()) {
+    return { ok: false, fallback: true, mensagem: "Validação por planilha não configurada." };
+  }
+
+  const v = await verificarCadastro(cli.tel, cli.nome);
+  if (!v.configurado) {
+    return { ok: false, fallback: true, mensagem: "Não consegui ler a planilha de cadastro agora." };
+  }
+  if (!v.encontrado) {
+    return {
+      ok: false,
+      mensagem: "Não encontrei seu cadastro pelo seu número. Você preencheu o formulário com este mesmo WhatsApp?",
+    };
+  }
+  if (!v.aceitou) {
+    return {
+      ok: false,
+      mensagem: "Encontrei seu cadastro, mas não consta o aceite da política. Pode confirmar o aceite no formulário, por favor?",
+    };
+  }
+
+  await registrarAceitePolitica({ clienteId, concordo: true });
+  await registrarAuditoria({
+    acao: "atualizar",
+    entidade: "clientes",
+    registroId: clienteId,
+    severidade: "info",
+    detalhes: "Cadastro/aceite validado pela planilha de respostas do formulário.",
+  }).catch(() => undefined);
   return { ok: true };
 }

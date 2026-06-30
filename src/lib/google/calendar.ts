@@ -105,6 +105,13 @@ async function accessTokenValido(c: GoogleAgendaConfig): Promise<string | null> 
   }
 }
 
+/** Access token válido do Google (Calendar + Sheets). null se não conectado/sem token. */
+export async function obterAccessTokenGoogle(): Promise<string | null> {
+  const cfg = await carregarConfig();
+  if (!cfg?.refresh_token) return null;
+  return accessTokenValido(cfg);
+}
+
 function eventosUrl(calendarId: string, eventId?: string): string {
   const cal = encodeURIComponent(calendarId || "primary");
   const base = `https://www.googleapis.com/calendar/v3/calendars/${cal}/events`;
