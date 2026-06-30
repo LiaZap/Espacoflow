@@ -187,7 +187,7 @@ export async function agendarReservaAgente(input: {
       // (não filtra por status_pagamento: assim um retry de reserva paga por pacote
       // reaproveita a já criada em vez de debitar o saldo de novo.)
       const [existente] = await tx
-        .select({ id: reservas.id, sala_id: reservas.sala_id })
+        .select({ id: reservas.id, sala_id: reservas.sala_id, pacote_cliente_id: reservas.pacote_cliente_id })
         .from(reservas)
         .where(
           and(
@@ -200,7 +200,15 @@ export async function agendarReservaAgente(input: {
         );
       if (existente) {
         const [s] = await tx.select({ nome: salas.nome }).from(salas).where(eq(salas.id, existente.sala_id));
-        return { id: existente.id, salaNome: s?.nome ?? "sala reservada", reaproveitado: true, viaPacote: false, saldoApos: null as number | null };
+        // Reflete como a reserva existente foi paga: se já é via pacote, NÃO pedir Pix de novo
+        // (retry/2ª chamada da mesma janela). saldoApos null = já debitado antes.
+        return {
+          id: existente.id,
+          salaNome: s?.nome ?? "sala reservada",
+          reaproveitado: true,
+          viaPacote: existente.pacote_cliente_id != null,
+          saldoApos: null as number | null,
+        };
       }
 
       // Anti-flood (dentro do lock): só conta holds pendentes RECENTES (últimas 24h).

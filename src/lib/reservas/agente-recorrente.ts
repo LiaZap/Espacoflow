@@ -36,7 +36,7 @@ export async function listarReservasFuturasCliente(clienteId: string): Promise<R
       and(
         eq(reservas.cliente_id, clienteId),
         eq(reservas.is_deleted, false),
-        notInArray(reservas.status_reserva, ["cancelada", "no_show"]),
+        notInArray(reservas.status_reserva, ["cancelada", "no_show", "rascunho"]),
         gt(reservas.fim_em, new Date())
       )
     )
