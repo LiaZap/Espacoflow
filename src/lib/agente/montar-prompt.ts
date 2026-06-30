@@ -126,7 +126,7 @@ async function blocoMidia(): Promise<string> {
 
   return `\n\n<midia_disponivel>
 Você pode ENVIAR estas fotos/arquivos pelo WhatsApp. Para enviar um, escreva o marcador EXATAMENTE assim, sozinho numa linha: [FOTO: identificador]. Pode enviar vários (um marcador por linha).
-Com CLIENTE NOVO, mostre 2–3 fotos das salas/ambiente durante o atendimento (depois de qualificar, ao apresentar o espaço/valores) para ele conhecer — de forma natural. Fora isso, envie quando fizer sentido (cliente quer ver/pediu/está decidindo); não despeje todas de uma vez sem contexto.
+Envie no MÁXIMO 3 fotos por vez, priorizando a sala mais adequada ao cliente — NUNCA mande todas de uma vez. Com cliente novo, mostre 2–3 fotos durante o atendimento, de forma natural (não anuncie que vai mandar).
 NUNCA escreva a palavra "marcador", não cite o identificador em voz alta e não anuncie que vai mandar foto — apenas inclua o marcador e siga a conversa naturalmente.
 Disponíveis (identificador: descrição):
 ${linhas.join("\n")}
