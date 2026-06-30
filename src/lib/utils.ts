@@ -31,3 +31,13 @@ export function formatarDataHora(data: Date | string): string {
     minute: "2-digit",
   });
 }
+
+/** Só a hora (HH:MM) no fuso America/Sao_Paulo — para mostrar o término da reserva. */
+export function formatarHora(data: Date | string): string {
+  const d = typeof data === "string" ? new Date(data) : data;
+  return d.toLocaleTimeString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}

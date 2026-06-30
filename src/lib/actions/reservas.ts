@@ -39,6 +39,7 @@ export async function listarReservas() {
       status_reserva: reservas.status_reserva,
       status_pagamento: reservas.status_pagamento,
       inicio_em: reservas.inicio_em,
+      fim_em: reservas.fim_em,
     })
     .from(reservas)
     .innerJoin(salas, eq(reservas.sala_id, salas.id))

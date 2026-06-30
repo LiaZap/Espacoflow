@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CancelarReservaBotao } from "./_components/cancelar-reserva-botao";
 import { CheckinBotoes } from "./_components/checkin-botoes";
-import { formatarDataHora } from "@/lib/utils";
+import { formatarDataHora, formatarHora } from "@/lib/utils";
 
 const STATUS_VARIANTE: Record<string, "default" | "secondary" | "success" | "warning" | "destructive"> = {
   rascunho: "secondary",
@@ -61,9 +61,9 @@ export default async function ReservasPage() {
             <thead className="border-b bg-muted/50 text-left text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">Início</th>
+                <th className="px-4 py-3 font-medium">Término</th>
                 <th className="px-4 py-3 font-medium">Sala</th>
                 <th className="px-4 py-3 font-medium">Cliente</th>
-                <th className="px-4 py-3 font-medium">Duração</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Pagamento</th>
                 <th className="px-4 py-3 text-right font-medium">Ações</th>
@@ -75,9 +75,12 @@ export default async function ReservasPage() {
                   <td className="px-4 py-3">
                     {r.inicio_em ? formatarDataHora(r.inicio_em) : `${r.data} ${r.hora}`}
                   </td>
+                  <td className="px-4 py-3">
+                    {r.fim_em ? formatarHora(r.fim_em) : "—"}
+                    <span className="ml-1 text-xs text-muted-foreground">({r.duracao_min} min)</span>
+                  </td>
                   <td className="px-4 py-3 font-medium">{r.sala_nome}</td>
                   <td className="px-4 py-3 text-muted-foreground">{r.cliente_nome}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{r.duracao_min} min</td>
                   <td className="px-4 py-3">
                     <Badge variant={STATUS_VARIANTE[r.status_reserva] ?? "secondary"}>
                       {r.status_reserva}
