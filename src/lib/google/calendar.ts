@@ -10,6 +10,7 @@ import { salas } from "@/lib/db/schema/salas";
 import { clientes } from "@/lib/db/schema/clientes";
 import { agenteConfig } from "@/lib/db/schema/agente";
 import { registrarAuditoria } from "@/lib/audit/logger";
+import { googleConfigurado } from "./oauth";
 import type { GoogleAgendaConfig } from "@/lib/db/schema/integracoes";
 
 /** Registra (auditoria) por que uma reserva CONFIRMADA não entrou na agenda. */
@@ -133,7 +134,15 @@ export async function sincronizarReserva(reservaId: string): Promise<void> {
     }
     const token = await accessTokenValido(cfg);
     if (!token) {
-      await avisarSyncFalhou(reservaId, "token do Google inválido/expirado (renovação falhou)");
+      // Distingue o caso clássico: o WORKER (serviço separado) está sem as credenciais
+      // GOOGLE_* no env, então não consegue renovar o token — o sync manual (no WEB,
+      // que tem as credenciais) funciona, mas o automático (no worker) não.
+      await avisarSyncFalhou(
+        reservaId,
+        googleConfigurado()
+          ? "não foi possível renovar o token do Google (refresh rejeitado — reconecte a conta)"
+          : "credenciais do Google ausentes NESTE serviço — defina GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET (provavelmente faltam no worker)"
+      );
       return;
     }
 
