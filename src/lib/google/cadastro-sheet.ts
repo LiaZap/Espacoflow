@@ -18,17 +18,15 @@ function digitos(s: string): string {
 }
 
 /** Casa dois telefones por sufixo (ignora DDI/DDD/formatação). Min. 8 dígitos em comum. */
-function telefoneCasa(a: string, b: string): boolean {
+export function telefoneCasa(a: string, b: string): boolean {
   const da = digitos(a);
   const db = digitos(b);
   if (da.length < 8 || db.length < 8) return false;
-  const sa = da.slice(-8);
-  const sb = db.slice(-8);
-  return sa === sb;
+  return da.slice(-8) === db.slice(-8);
 }
 
 /** Resposta afirmativa de aceite (checkbox/opção do Forms). */
-function ehAceite(valor: string): boolean {
+export function ehAceite(valor: string): boolean {
   const v = (valor ?? "").trim().toLowerCase();
   if (!v) return false;
   return /sim|aceito|aceit|concord|de acordo|li e|autorizo|estou ciente/.test(v);
@@ -45,6 +43,17 @@ function acharColuna(header: string[], termos: string[]): number {
     const hn = norm(h);
     return termos.some((t) => hn.includes(t));
   });
+}
+
+/** Resolve os índices das colunas relevantes a partir do cabeçalho do formulário. */
+export function resolverColunas(header: string[]): { iTel: number; iNome: number; iAceite: number } {
+  return {
+    iTel: acharColuna(header, ["telefone", "whatsapp", "celular", "telefon", "fone"]),
+    iNome: acharColuna(header, ["nome completo", "nome"]),
+    // "acordo"/"politica" casa "Está de acordo com a política de uso?". NÃO usar "uso"
+    // (casaria "Frequência de uso" / "Telefone ... (Uso frequente)").
+    iAceite: acharColuna(header, ["acordo", "politica", "polit", "concord", "aceit", "termo"]),
+  };
 }
 
 interface LinhaCadastro {
@@ -99,9 +108,7 @@ export async function verificarCadastro(
     if (!dados) return { configurado: false, encontrado: false, aceitou: false };
 
     const { header, linhas } = dados;
-    const iTel = acharColuna(header, ["telefone", "whatsapp", "celular", "contato", "telefon", "fone"]);
-    const iNome = acharColuna(header, ["nome"]);
-    const iAceite = acharColuna(header, ["politica", "polit", "aceit", "concord", "termo", "uso"]);
+    const { iTel, iNome, iAceite } = resolverColunas(header);
 
     // Sem coluna de telefone não dá para casar com segurança.
     if (iTel < 0) return { configurado: true, encontrado: false, aceitou: false };
