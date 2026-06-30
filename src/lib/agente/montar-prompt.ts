@@ -4,6 +4,7 @@ import { agenteConfig, agentePrecos, agenteBaseConhecimento, agenteMidia } from 
 import { clientes } from "@/lib/db/schema/clientes";
 import { reservas } from "@/lib/db/schema/reservas";
 import { obterMemoria } from "@/lib/mongo/client";
+import { pacoteAtivoDoCliente } from "@/lib/reservas/pacote-saldo";
 import { slugMidia } from "@/lib/whatsapp/midia-marcadores";
 import { formatarBRL } from "@/lib/utils";
 import { PROMPT_BASE_HIGIA } from "./prompt-base";
@@ -96,9 +97,13 @@ Você pode AGENDAR sozinha, sem passar para um humano. Para CLIENTE NOVO, use as
 4) "aceitar_politica" — SÓ depois de o cliente topar o horário: mande o link do cadastro UMA vez e, quando ele confirmar que aceita, registre. NÃO reenvie o link nem fique repetindo.
 5) "agendar_reserva" — UMA VEZ POR SESSÃO, preenchendo precisa_mesa (true se precisa de mesa/apoio p/ notebook; false para psicólogo de conversa → Sala 02 sem mesa). Internamente ficam provisórias até o Pix; ao cliente, diga "já segurei o seu horário" — NUNCA use a palavra "provisória".
 6) Depois de agendar TODAS, envie o Pix ([PIX]) e PEÇA o comprovante aqui. Diga que assim que ele chegar fica tudo certo por aqui — o sistema confirma TUDO automaticamente e avisa o cliente. NUNCA afirme você mesma que está "pago", "confirmado" ou "garantido".
-CLIENTE RECORRENTE ("Cliente recorrente: sim" na memória): PULE os passos 1 e 4 — já foi qualificado e já aceitou a política. Vá direto à disponibilidade e à reserva.
+CLIENTE RECORRENTE ("Cliente recorrente: sim" na memória): PULE os passos 1 e 4 (já foi qualificado e já aceitou a política). Vá direto ao que ele quer:
+- RESERVAR: se a memória mostrar "Pacote ativo", ofereça usar o saldo; se ele topar, agende com usar_saldo=true (fica CONFIRMADA na hora, SEM Pix, e informe o saldo restante). Sem pacote (ou saldo insuficiente), siga avulsa por Pix.
+- CANCELAR: use "listar_minhas_reservas" para achar a reserva certa (confirme com o cliente qual é), depois "cancelar_reserva" com o reserva_id. Se voltar horas pro pacote, avise.
+- ALTERAR/REMARCAR: "listar_minhas_reservas" → "alterar_reserva" (reserva_id + nova_data + nova_hora). Mantém a mesma duração e sala.
+- DÚVIDAS: responda direto (veja <duvidas_comuns>).
 Se algum horário estiver indisponível ou der erro, ofereça outro — não force; agende os que der.
-Use [HUMANO] só em exceções (reclamação, reembolso, ALTERAR/CANCELAR uma reserva já existente, nota fiscal, ou algo que as ferramentas não resolvem).
+Use [HUMANO] só em exceções reais (reclamação grave, reembolso, nota fiscal, ou algo que as ferramentas não resolvem). Cancelar/alterar/saldo VOCÊ resolve com as ferramentas — não escale.
 </agendamento_automatico>`;
 }
 
@@ -165,6 +170,13 @@ async function blocoMemoria(clienteId: string): Promise<string> {
   if (cli.profissao) linhas.push(`- Profissão: ${cli.profissao}`);
   if (cli.interesses) linhas.push(`- Interesses: ${cli.interesses}`);
   if (cli.dores) linhas.push(`- Dores/necessidades: ${cli.dores}`);
+  // Pacote ativo: a Hígia pode oferecer usar o saldo (sem Pix) ao reservar.
+  const pacote = await pacoteAtivoDoCliente(clienteId).catch(() => null);
+  if (pacote) {
+    linhas.push(
+      `- Pacote ativo: ${pacote.horasSaldo}h de saldo (válido até ${pacote.validoAte}). Ofereça usar o saldo na reserva (agendar com usar_saldo=true, sem Pix) se o cliente quiser.`
+    );
+  }
   // Para cliente NOVO, sinaliza o que ainda falta no onboarding (o sistema bloqueia a
   // reserva sem isso). Recorrente já passou por tudo — não repetir.
   if (recorrente) {

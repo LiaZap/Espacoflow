@@ -1,5 +1,11 @@
 import { consultarDisponibilidadeAgente, agendarReservaAgente } from "@/lib/reservas/agendar";
 import { calcularPrecoAvulsa } from "@/lib/reservas/preco";
+import { pacoteAtivoDoCliente } from "@/lib/reservas/pacote-saldo";
+import {
+  listarReservasFuturasCliente,
+  cancelarReservaAgente,
+  alterarReservaAgente,
+} from "@/lib/reservas/agente-recorrente";
 import { registrarQualificacao, registrarAceitePolitica } from "./onboarding";
 
 /** Definições das ferramentas (formato tool use da Anthropic) que a Hígia pode chamar. */
@@ -93,13 +99,56 @@ export const FERRAMENTAS_AGENDA = [
           description:
             "true se o cliente vai precisar de mesa/escrivaninha (ex.: apoio para notebook). false para terapia de conversa (psicólogo → Sala 02 sem mesa). Pergunte ao cliente se não souber.",
         },
+        usar_saldo: {
+          type: "boolean",
+          description:
+            "true para pagar com o SALDO do pacote do cliente (recorrente com pacote ativo) — a reserva já fica confirmada, SEM Pix. Só use se a memória indicar pacote ativo e o cliente concordar em usar o saldo.",
+        },
         valor: {
           type: "number",
           description:
-            "Valor TOTAL combinado da reserva, em reais (conforme a tabela de preços). Usado para validar o comprovante de Pix do cliente.",
+            "Valor TOTAL combinado da reserva, em reais (conforme a tabela de preços). Usado para validar o comprovante de Pix. Ignorado quando usar_saldo=true.",
         },
       },
       required: ["data", "hora", "duracao_min"],
+    },
+  },
+  {
+    name: "consultar_saldo",
+    description:
+      "Consulta o saldo de pacote ativo do cliente desta conversa (horas restantes e validade). Use quando um cliente recorrente quiser reservar para saber se pode usar o saldo do pacote em vez de Pix.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "listar_minhas_reservas",
+    description:
+      "Lista as reservas FUTURAS do cliente desta conversa (id, sala, data, hora). Use antes de cancelar/alterar, para saber QUAL reserva o cliente quer mexer (e pegar o reserva_id).",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "cancelar_reserva",
+    description:
+      "Cancela uma reserva do cliente desta conversa. Use o reserva_id de listar_minhas_reservas. Se o cancelamento for dentro do prazo e a reserva foi paga por pacote, as horas voltam ao saldo automaticamente.",
+    input_schema: {
+      type: "object",
+      properties: {
+        reserva_id: { type: "string", description: "ID da reserva a cancelar (de listar_minhas_reservas)" },
+      },
+      required: ["reserva_id"],
+    },
+  },
+  {
+    name: "alterar_reserva",
+    description:
+      "Remarca uma reserva do cliente para nova data/hora (mantém a MESMA duração e sala). Use o reserva_id de listar_minhas_reservas. Verifica disponibilidade antes de mover.",
+    input_schema: {
+      type: "object",
+      properties: {
+        reserva_id: { type: "string", description: "ID da reserva a remarcar (de listar_minhas_reservas)" },
+        nova_data: { type: "string", description: "Nova data no formato AAAA-MM-DD" },
+        nova_hora: { type: "string", description: "Novo horário de início HH:MM (24h)" },
+      },
+      required: ["reserva_id", "nova_data", "nova_hora"],
     },
   },
 ] as const;
@@ -182,30 +231,91 @@ export async function executarFerramentaAgenda(
 
     if (nome === "agendar_reserva") {
       const duracaoMin = num(input.duracao_min);
+      const usarSaldo = bool(input.usar_saldo);
+
+      // Pagamento por SALDO de pacote (recorrente): resolve o pacote ativo no servidor.
+      let pacoteClienteId: string | undefined;
+      if (usarSaldo) {
+        const pac = await pacoteAtivoDoCliente(ctx.clienteId);
+        if (!pac) {
+          return JSON.stringify({ ok: false, motivo: "O cliente não tem pacote com saldo ativo — siga pelo Pix (avulsa)." });
+        }
+        pacoteClienteId = pac.id;
+      }
+
       let valor = input.valor != null ? num(input.valor) : undefined;
-      if (valor == null || valor <= 0) {
+      if (!usarSaldo && (valor == null || valor <= 0)) {
         // Deriva o valor avulso no servidor quando o LLM não envia — sem isso o
         // pagamento nasce com valor null e TODA leitura de comprovante consta como
         // "divergente" no painel de inconsistências.
         const calc = calcularPrecoAvulsa([{ data: str(input.data), horas: duracaoMin / 60 }]);
         if (calc.total > 0) valor = calc.total;
       }
+
       const r = await agendarReservaAgente({
         clienteId: ctx.clienteId,
         data: str(input.data),
         hora: str(input.hora),
         duracaoMin,
         finalidade: input.finalidade ? str(input.finalidade) : undefined,
-        valor,
+        valor: usarSaldo ? undefined : valor,
         precisaMesa: input.precisa_mesa != null ? bool(input.precisa_mesa) : undefined,
+        pacoteClienteId,
       });
       if ("erro" in r) return JSON.stringify({ ok: false, motivo: r.erro });
+
+      if (r.viaPacote) {
+        return JSON.stringify({
+          ok: true,
+          reserva: { sala: r.salaNome, data: r.data, hora: r.hora, duracao_min: r.duracaoMin },
+          pago_por: "pacote",
+          saldo_restante: r.saldoApos,
+          proximo_passo:
+            "Reserva CONFIRMADA usando o saldo do pacote (NÃO peça Pix). Diga ao cliente que está confirmada e informe o saldo restante de horas.",
+        });
+      }
       return JSON.stringify({
         ok: true,
         reserva: { sala: r.salaNome, data: r.data, hora: r.hora, duracao_min: r.duracaoMin },
         proximo_passo:
           "Horário SEGURADO. Diga ao cliente que você já segurou o horário dele (NÃO use a palavra 'provisória'). Depois de agendar TODAS as sessões pedidas, envie o Pix (marcador [PIX]) e peça o comprovante aqui. Quando o comprovante chegar, o sistema confirma tudo automaticamente — não diga que a equipe confirma nem que já está pago.",
       });
+    }
+
+    if (nome === "consultar_saldo") {
+      const pac = await pacoteAtivoDoCliente(ctx.clienteId);
+      if (!pac) {
+        return JSON.stringify({ ok: true, tem_saldo: false, mensagem: "Cliente sem pacote ativo — a reserva é avulsa (Pix)." });
+      }
+      return JSON.stringify({
+        ok: true,
+        tem_saldo: true,
+        pacote: pac.pacoteNome,
+        horas_saldo: pac.horasSaldo,
+        valido_ate: pac.validoAte,
+        proximo_passo: "Ofereça usar o saldo do pacote; se o cliente topar, agende com usar_saldo=true (sem Pix).",
+      });
+    }
+
+    if (nome === "listar_minhas_reservas") {
+      const lista = await listarReservasFuturasCliente(ctx.clienteId);
+      return JSON.stringify({
+        ok: true,
+        reservas: lista,
+        ...(lista.length === 0 ? { aviso: "O cliente não tem reservas futuras." } : {}),
+      });
+    }
+
+    if (nome === "cancelar_reserva") {
+      const r = await cancelarReservaAgente(ctx.clienteId, str(input.reserva_id));
+      if (r.erro) return JSON.stringify({ ok: false, motivo: r.erro });
+      return JSON.stringify({ ok: true, mensagem_para_o_cliente: r.mensagem, horas_creditadas: r.horasCreditadas });
+    }
+
+    if (nome === "alterar_reserva") {
+      const r = await alterarReservaAgente(ctx.clienteId, str(input.reserva_id), str(input.nova_data), str(input.nova_hora));
+      if (r.erro) return JSON.stringify({ ok: false, motivo: r.erro });
+      return JSON.stringify({ ok: true, mensagem_para_o_cliente: r.mensagem });
     }
 
     return JSON.stringify({ ok: false, motivo: "ferramenta desconhecida" });

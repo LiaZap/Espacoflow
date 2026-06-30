@@ -7,9 +7,10 @@ import { pagamentos } from "@/lib/db/schema/pagamentos";
 import { sincronizarReserva } from "@/lib/google/calendar";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { calcularJanela, ABRE_MIN, JORNADA_MIN } from "./disponibilidade";
+import { debitarPacoteEmTx, registrarDebitoEmTx, SaldoError } from "./pacote-saldo";
 
 /** Reservas que NÃO bloqueiam o horário (não contam como conflito). */
-const STATUS_LIVRES = ["cancelada", "no_show", "rascunho"];
+export const STATUS_LIVRES = ["cancelada", "no_show", "rascunho"];
 /** Teto de holds pendentes futuros por cliente — backstop anti-runaway (não atrapalha
  * lotes reais: um cliente pode agendar várias sessões na mesma conversa). */
 const MAX_HOLDS_PENDENTES = 30;
@@ -38,7 +39,7 @@ export function ordenarSalasPorPreferencia<T extends { prioridade: number | null
   return [...livres].sort((a, b) => pref(a) - pref(b) || (a.prioridade ?? 99) - (b.prioridade ?? 99));
 }
 
-function janelaSanitizada(data: string, hora: string, duracaoMin: number): string | null {
+export function janelaSanitizada(data: string, hora: string, duracaoMin: number): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) return "Data inválida (use AAAA-MM-DD).";
   // Hora 00:00–23:59 (regex de formato aceitaria 19:99/25:00 — barramos aqui).
   if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(hora)) return "Hora inválida (use HH:MM, 24h).";
@@ -100,6 +101,10 @@ export interface AgendamentoOk {
   data: string;
   hora: string;
   duracaoMin: number;
+  /** true se a reserva já saiu CONFIRMADA debitando saldo de pacote (não precisa de Pix). */
+  viaPacote?: boolean;
+  /** saldo de horas restante no pacote, quando pago via pacote. */
+  saldoApos?: number;
 }
 
 /**
@@ -117,8 +122,10 @@ export async function agendarReservaAgente(input: {
   salaId?: string;
   valor?: number;
   precisaMesa?: boolean;
+  /** Se informado, paga a reserva debitando esse pacote (sem Pix) — recorrente com saldo. */
+  pacoteClienteId?: string;
 }): Promise<AgendamentoOk | { erro: string }> {
-  const { clienteId, data, hora, duracaoMin, finalidade, valor } = input;
+  const { clienteId, data, hora, duracaoMin, finalidade, valor, pacoteClienteId } = input;
   const invalido = janelaSanitizada(data, hora, duracaoMin);
   if (invalido) return { erro: invalido };
 
@@ -176,7 +183,9 @@ export async function agendarReservaAgente(input: {
       // corrida — retry da fila pós-agendamento, inline concorrente ou 2 tool_use no turno.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${clienteId}))`);
 
-      // IDEMPOTÊNCIA: já existe hold pendente do MESMO cliente para ESTA janela? Reaproveita.
+      // IDEMPOTÊNCIA: já existe reserva ATIVA do MESMO cliente para ESTA janela? Reaproveita.
+      // (não filtra por status_pagamento: assim um retry de reserva paga por pacote
+      // reaproveita a já criada em vez de debitar o saldo de novo.)
       const [existente] = await tx
         .select({ id: reservas.id, sala_id: reservas.sala_id })
         .from(reservas)
@@ -184,7 +193,6 @@ export async function agendarReservaAgente(input: {
           and(
             eq(reservas.cliente_id, clienteId),
             eq(reservas.is_deleted, false),
-            eq(reservas.status_pagamento, "pendente"),
             notInArray(reservas.status_reserva, STATUS_LIVRES),
             eq(reservas.inicio_em, inicio),
             eq(reservas.fim_em, fim)
@@ -192,7 +200,7 @@ export async function agendarReservaAgente(input: {
         );
       if (existente) {
         const [s] = await tx.select({ nome: salas.nome }).from(salas).where(eq(salas.id, existente.sala_id));
-        return { id: existente.id, salaNome: s?.nome ?? "sala reservada", reaproveitado: true };
+        return { id: existente.id, salaNome: s?.nome ?? "sala reservada", reaproveitado: true, viaPacote: false, saldoApos: null as number | null };
       }
 
       // Anti-flood (dentro do lock): só conta holds pendentes RECENTES (últimas 24h).
@@ -250,11 +258,23 @@ export async function agendarReservaAgente(input: {
         throw new ReservaIndisponivel("Nenhuma sala livre nesse horário.");
       }
 
+      // Pagamento por PACOTE (recorrente com saldo): debita ANTES de inserir, e a reserva
+      // já nasce CONFIRMADA/paga (sem Pix). Senão, hold pendente de Pix (fluxo normal).
+      let horasDebitadas: number | null = null;
+      let saldoApos: number | null = null;
+      if (pacoteClienteId) {
+        const horas = Math.round((duracaoMin / 60) * 100) / 100;
+        const r = await debitarPacoteEmTx(tx, { pacoteClienteId, clienteId, horas });
+        horasDebitadas = horas;
+        saldoApos = r.saldoApos;
+      }
+
       const [nova] = await tx
         .insert(reservas)
         .values({
           sala_id: escolhida.id,
           cliente_id: clienteId,
+          pacote_cliente_id: pacoteClienteId ?? null,
           titulo: finalidade?.trim() || "Reserva via Hígia",
           data,
           hora,
@@ -262,39 +282,63 @@ export async function agendarReservaAgente(input: {
           inicio_em: inicio,
           fim_em: fim,
           tipo: "uso_sala",
-          status_reserva: "pendente",
-          status_pagamento: "pendente",
+          status_reserva: pacoteClienteId ? "confirmada" : "pendente",
+          status_pagamento: pacoteClienteId ? "pago" : "pendente",
           origem: "higia",
           modalidade: "presencial",
+          horas_debitadas: horasDebitadas != null ? String(horasDebitadas) : null,
         })
         .returning();
 
-      // Registro de pagamento pendente (Pix manual) — é contra ele que o comprovante
-      // enviado pelo cliente será lido/validado. valor = preço combinado pela Hígia.
-      await tx.insert(pagamentos).values({
-        cliente_id: clienteId,
-        reserva_id: nova.id,
-        valor: valor != null && Number.isFinite(valor) ? String(valor) : null,
-        status: "pendente",
-        provedor: "pix_manual",
-      });
+      if (pacoteClienteId && horasDebitadas != null && saldoApos != null) {
+        // Movimento de débito (ledger) — após inserir a reserva (precisa do reserva_id).
+        await registrarDebitoEmTx(tx, {
+          pacoteClienteId,
+          reservaId: nova.id,
+          horas: horasDebitadas,
+          saldoApos,
+        });
+      } else {
+        // Registro de pagamento pendente (Pix manual) — é contra ele que o comprovante
+        // enviado pelo cliente será lido/validado. valor = preço combinado pela Hígia.
+        await tx.insert(pagamentos).values({
+          cliente_id: clienteId,
+          reserva_id: nova.id,
+          valor: valor != null && Number.isFinite(valor) ? String(valor) : null,
+          status: "pendente",
+          provedor: "pix_manual",
+        });
+      }
 
-      return { id: nova.id, salaNome: escolhida.nome, reaproveitado: false };
+      return { id: nova.id, salaNome: escolhida.nome, reaproveitado: false, viaPacote: !!pacoteClienteId, saldoApos };
     });
 
-    // Auditoria + Google só para hold NOVO (reaproveitado já foi registrado/sincronizado).
+    // Auditoria + Google só para reserva NOVA (reaproveitada já foi registrada/sincronizada).
     if (!reserva.reaproveitado) {
       await registrarAuditoria({
         acao: "criar",
         entidade: "reservas",
         registroId: reserva.id,
-        detalhes: `Hígia agendou (hold) ${data} ${hora} (${duracaoMin}min) em ${reserva.salaNome} — pendente de Pix`,
+        detalhes: reserva.viaPacote
+          ? `Hígia agendou ${data} ${hora} (${duracaoMin}min) em ${reserva.salaNome} — PAGO via pacote (saldo restante: ${reserva.saldoApos}h)`
+          : `Hígia agendou (hold) ${data} ${hora} (${duracaoMin}min) em ${reserva.salaNome} — pendente de Pix`,
       }).catch(() => undefined);
+      // Reserva paga por pacote já é "confirmada" → entra no Google na hora.
       await sincronizarReserva(reserva.id).catch(() => undefined);
     }
 
-    return { ok: true, reservaId: reserva.id, salaNome: reserva.salaNome, data, hora, duracaoMin };
+    return {
+      ok: true,
+      reservaId: reserva.id,
+      salaNome: reserva.salaNome,
+      data,
+      hora,
+      duracaoMin,
+      viaPacote: reserva.viaPacote,
+      saldoApos: reserva.saldoApos ?? undefined,
+    };
   } catch (e: unknown) {
+    if (e instanceof SaldoError) return { erro: e.message };
     if (e instanceof ReservaIndisponivel) return { erro: e.message };
     if (typeof e === "object" && e !== null && "code" in e && (e as { code: string }).code === "23P01") {
       return { erro: "Horário acabou de ser ocupado — ofereça outro horário." };
