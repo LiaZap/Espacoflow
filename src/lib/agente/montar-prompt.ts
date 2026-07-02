@@ -69,16 +69,19 @@ export async function montarPromptHigia(opts?: {
       ? `${config.hora_inicio.slice(0, 5)}h às ${config.hora_fim.slice(0, 5)}h`
       : "07h às 23h";
 
+  // Saudação pelo horário atual em SP (Bom dia 06–11h59 / Boa tarde 12–17h59 / Boa noite 18–05h59).
+  const tz = config?.timezone ?? "America/Sao_Paulo";
+  const horaSP = Number(new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", hour12: false }).format(new Date()));
+  const saudacao = horaSP >= 6 && horaSP < 12 ? "Bom dia" : horaSP >= 12 && horaSP < 18 ? "Boa tarde" : "Boa noite";
+
   const prompt = persona
     .replaceAll("{{NOME_AGENTE}}", config?.nome_agente ?? "Hígia")
     .replaceAll("{{NOME_ESPACO}}", config?.nome_espaco ?? "Espaço Flow")
     .replaceAll("{{HORARIO}}", horario)
+    .replaceAll("{{SAUDACAO}}", saudacao)
     .replaceAll("{{PRECOS}}", precosTxt)
     .replaceAll("{{BASE_CONHECIMENTO}}", baseTxt)
-    .replaceAll(
-      "{{DATA_HORA}}",
-      new Date().toLocaleString("pt-BR", { timeZone: config?.timezone ?? "America/Sao_Paulo" })
-    );
+    .replaceAll("{{DATA_HORA}}", new Date().toLocaleString("pt-BR", { timeZone: tz }));
 
   const pix = blocoPix(config);
   const midia = await blocoMidia();
