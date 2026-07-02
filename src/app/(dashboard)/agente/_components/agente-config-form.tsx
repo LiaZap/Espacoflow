@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { DEFAULT_BOAS_VINDAS_NOVO, DEFAULT_FORA_PERFIL } from "@/lib/agente/mensagens-padrao";
 
 const selectClasses =
   "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2";
@@ -73,6 +74,38 @@ export function AgenteConfigForm({ config }: { config: AgenteConfig }) {
       <Campo label="Prompt-base / persona (deixe vazio para usar o padrão da Hígia)">
         <Textarea name="prompt_sistema" rows={6} defaultValue={config.prompt_sistema ?? ""} />
       </Campo>
+
+      <div className="space-y-4 rounded-md border p-4">
+        <div>
+          <p className="text-sm font-medium">Mensagens da Hígia</p>
+          <p className="text-xs text-muted-foreground">
+            Edite os textos que a Hígia usa. Vale na hora ao salvar, sem precisar de deploy. As regras e
+            ferramentas não mudam — só o texto. Deixe um campo vazio para voltar ao padrão.
+          </p>
+        </div>
+        <Campo label="Boas-vindas (cliente novo) — saudação (bom dia/tarde/noite) é automática">
+          <Textarea
+            name="msg_boas_vindas_novo"
+            rows={10}
+            defaultValue={config.msg_boas_vindas_novo || DEFAULT_BOAS_VINDAS_NOVO}
+          />
+        </Campo>
+        <Campo label="Fora do perfil (quando não atende o cliente)">
+          <Textarea
+            name="msg_fora_perfil"
+            rows={3}
+            defaultValue={config.msg_fora_perfil || DEFAULT_FORA_PERFIL}
+          />
+        </Campo>
+        <Campo label="Boas-vindas / acesso (após a reserva confirmada) — use {{SALA}} e {{ACESSO}}">
+          <Textarea
+            name="msg_boas_vindas"
+            rows={8}
+            defaultValue={config.msg_boas_vindas ?? ""}
+            placeholder="Enviada quando o pagamento é confirmado. Use {{SALA}} e {{ACESSO}} para inserir a sala e o código de acesso automaticamente."
+          />
+        </Campo>
+      </div>
 
       <div className="space-y-4 rounded-md border p-4">
         <div>

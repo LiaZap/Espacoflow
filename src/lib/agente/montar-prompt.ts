@@ -8,6 +8,7 @@ import { pacoteAtivoDoCliente } from "@/lib/reservas/pacote-saldo";
 import { slugMidia } from "@/lib/whatsapp/midia-marcadores";
 import { formatarBRL } from "@/lib/utils";
 import { PROMPT_BASE_HIGIA } from "./prompt-base";
+import { DEFAULT_BOAS_VINDAS_NOVO, DEFAULT_FORA_PERFIL } from "./mensagens-padrao";
 
 /**
  * Monta o prompt da Hígia em runtime, injetando persona (config) + preços + base
@@ -79,6 +80,8 @@ export async function montarPromptHigia(opts?: {
     .replaceAll("{{NOME_ESPACO}}", config?.nome_espaco ?? "Espaço Flow")
     .replaceAll("{{HORARIO}}", horario)
     .replaceAll("{{SAUDACAO}}", saudacao)
+    .replaceAll("{{MSG_BOAS_VINDAS_NOVO}}", config?.msg_boas_vindas_novo?.trim() || DEFAULT_BOAS_VINDAS_NOVO)
+    .replaceAll("{{MSG_FORA_PERFIL}}", config?.msg_fora_perfil?.trim() || DEFAULT_FORA_PERFIL)
     .replaceAll("{{PRECOS}}", precosTxt)
     .replaceAll("{{BASE_CONHECIMENTO}}", baseTxt)
     .replaceAll("{{DATA_HORA}}", new Date().toLocaleString("pt-BR", { timeZone: tz }));

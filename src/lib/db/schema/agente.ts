@@ -45,6 +45,9 @@ export const agenteConfig = pgTable("agente_config", {
   // Mensagem de boas-vindas/onboarding enviada ao cliente APÓS a reserva confirmada.
   // Placeholders: {{SALA}} (nome da sala) e {{ACESSO}} (instrução de acesso da sala).
   msg_boas_vindas: text("msg_boas_vindas"),
+  // Copy editável pelo painel (refino sem deploy). Vazio = usa o padrão do código.
+  msg_boas_vindas_novo: text("msg_boas_vindas_novo"), // boas-vindas do cliente NOVO (F1.0)
+  msg_fora_perfil: text("msg_fora_perfil"), // mensagem de cliente fora do perfil (F1.1)
 
   created_at: timestamp("created_at").notNull().defaultNow(),
   updated_at: timestamp("updated_at").notNull().defaultNow(),
