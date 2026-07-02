@@ -312,8 +312,12 @@ export async function processarComprovanteHigia(params: {
   }
 
   // ===== Confirma DIRETO o lote ainda válido (decisão do espaço; sem etapa da equipe). =====
-  await db.transaction(async (tx) => {
-    await tx
+  // Guarda de corrida: a confirmação SÓ vale se ESTE processo flipou os pagamentos de
+  // pendente/em_análise → confirmado (predicado de status + returning). No modo inline
+  // (sem worker) dois prints quase simultâneos disparam duas execuções; a 2ª encontra 0
+  // linhas para flipar → NÃO reenvia confirmação/resumo/boas-vindas (sem duplicar no chat).
+  const confirmados = await db.transaction(async (tx) => {
+    const flip = await tx
       .update(pagamentos)
       .set({
         status: "confirmado",
@@ -323,7 +327,9 @@ export async function processarComprovanteHigia(params: {
         // validado_por null = confirmado automaticamente pela Hígia (decisão do espaço).
         updated_at: new Date(),
       })
-      .where(inArray(pagamentos.id, idsOk));
+      .where(and(inArray(pagamentos.id, idsOk), inArray(pagamentos.status, ["pendente", "em_analise"])))
+      .returning({ id: pagamentos.id });
+    if (flip.length === 0) return [] as { id: string }[]; // outra execução já confirmou este lote
     await tx
       .update(reservas)
       .set({ status_pagamento: "pago", status_reserva: "confirmada", updated_at: new Date() })
@@ -347,7 +353,14 @@ export async function processarComprovanteHigia(params: {
           isNotNull(clientes.aceitou_politica_em)
         )
       );
+    return flip;
   });
+
+  if (confirmados.length === 0) {
+    // Corrida no modo inline: outra execução concorrente já confirmou este mesmo lote e
+    // está enviando a confirmação/resumo/boas-vindas. Aqui não duplicamos nada.
+    return { tratou: true, enviada: false, confirmada: true };
+  }
 
   await registrarAuditoria({
     acao: "validar_pix",

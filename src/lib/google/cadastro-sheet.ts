@@ -27,8 +27,16 @@ export function telefoneCasa(a: string, b: string): boolean {
 
 /** Resposta afirmativa de aceite (checkbox/opção do Forms). */
 export function ehAceite(valor: string): boolean {
-  const v = (valor ?? "").trim().toLowerCase();
+  // Tira acentos p/ "não" casar "nao"; consentimento erra para o lado seguro (na dúvida, NÃO aceita).
+  const v = (valor ?? "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .trim()
+    .toLowerCase();
   if (!v) return false;
+  // Recusa explícita tem PRECEDÊNCIA sobre o "aceit"/"concord"/"de acordo" que ela contém:
+  // "Não aceito", "Não concordo", "Não estou de acordo", "Discordo", "Recuso".
+  if (/\bnao\b/.test(v) || /discord|recus/.test(v)) return false;
   return /sim|aceito|aceit|concord|de acordo|li e|autorizo|estou ciente/.test(v);
 }
 

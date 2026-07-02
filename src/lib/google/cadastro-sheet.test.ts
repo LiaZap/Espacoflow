@@ -62,7 +62,17 @@ describe("ehAceite", () => {
     expect(ehAceite("Sim")).toBe(true);
     expect(ehAceite("Sim, estou de acordo")).toBe(true);
     expect(ehAceite("Li e aceito a política")).toBe(true);
+    expect(ehAceite("Concordo")).toBe(true);
     expect(ehAceite("Não")).toBe(false);
     expect(ehAceite("")).toBe(false);
+  });
+
+  it("NÃO lê recusa como aceite (a recusa contém 'aceit'/'concord'/'de acordo')", () => {
+    expect(ehAceite("Não aceito")).toBe(false);
+    expect(ehAceite("Não concordo")).toBe(false);
+    expect(ehAceite("Não estou de acordo")).toBe(false);
+    expect(ehAceite("Não autorizo")).toBe(false);
+    expect(ehAceite("Discordo")).toBe(false);
+    expect(ehAceite("Recuso")).toBe(false);
   });
 });

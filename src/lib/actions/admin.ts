@@ -134,7 +134,10 @@ export async function importarCadastrosFormulario(): Promise<{
       await db
         .update(clientes)
         .set({
-          status_lead: "cliente",
+          // Só promove a "cliente" (que o gate trata como recorrente e libera reserva) se
+          // houve aceite — antes ou agora. Sem aceite, mantém o status atual e o gate exige
+          // a política pelo chat antes de reservar (LGPD).
+          ...(existente.aceitou_politica_em || c.aceitou ? { status_lead: "cliente" as const } : {}),
           is_deleted: false,
           deleted_at: null,
           ...(c.aceitou && !existente.aceitou_politica_em ? { aceitou_politica_em: new Date() } : {}),
@@ -154,7 +157,8 @@ export async function importarCadastrosFormulario(): Promise<{
         email: c.email,
         documento: c.documento,
         profissao: c.profissao,
-        status_lead: "cliente",
+        // Sem aceite não vira "cliente" — entra como lead e a Hígia pede a política no chat.
+        status_lead: c.aceitou ? "cliente" : "novo",
         origem: "importado",
         aceitou_politica_em: c.aceitou ? new Date() : null,
         modified_by: sessao.userId,
