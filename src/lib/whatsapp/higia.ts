@@ -10,6 +10,7 @@ import { getProvider } from "./provider";
 import { enviarHumanizado, limparTextoHigia } from "./humanizar";
 import { extrairMarcadores, resolverMidia, urlMidiaAbsoluta, tipoWhatsapp } from "./midia-marcadores";
 import { extrairPix, montarMensagensPix } from "./pix";
+import { extrairTabela, montarTabelaPrecos } from "./tabela-precos";
 import { FERRAMENTAS_AGENDA, executarFerramentaAgenda } from "@/lib/agente/ferramentas";
 import { processarComprovanteHigia } from "./comprovante-higia";
 
@@ -226,7 +227,8 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
   // manda o texto LIMPO e depois envia Pix (texto) e fotos.
   const marc = extrairMarcadores(texto);
   const pix = extrairPix(marc.texto);
-  const textoLimpo = pix.texto;
+  const tabela = extrairTabela(pix.texto);
+  const textoLimpo = tabela.texto;
   const tokens = marc.tokens;
 
   const provider = getProvider();
@@ -254,6 +256,28 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     });
     blocosTexto = r.blocos;
     algumOk = algumOk || r.algumOk;
+  }
+
+  // Tabela de valores pedida via [TABELA] — enviada COMPLETA e em UMA única mensagem
+  // (montada do banco; sem picar e sem o LLM omitir linhas).
+  if (tabela.temTabela) {
+    const texto_tabela = await montarTabelaPrecos();
+    if (texto_tabela) {
+      await provider.definirPresenca(telefone, "composing").catch(() => undefined);
+      const envio = await provider.enviarTexto(telefone, texto_tabela);
+      algumOk = algumOk || envio.ok;
+      blocosTexto += 1;
+      await db.insert(whatsappMensagens).values({
+        conversa_id: conversaId,
+        origem: "higia",
+        tipo: "text",
+        conteudo: texto_tabela,
+        status: envio.ok ? "sent" : "failed",
+        processada_por_higia: true,
+        enviada_em: new Date(),
+        id_externo: envio.idExterno ?? null,
+      });
+    }
   }
 
   // Pix (texto) pedido pela Hígia via [PIX] — chave exata vem da config.

@@ -251,6 +251,18 @@ export async function executarFerramentaAgenda(
       const duracaoMin = num(input.duracao_min);
       const usarSaldo = bool(input.usar_saldo);
 
+      // A sala NÃO pode ser decidida silenciosamente: exige a escolha explícita do
+      // cliente (sala) OU a resposta de "precisa de mesa?" antes de alocar.
+      const temSala = input.sala != null && str(input.sala).trim().length > 0;
+      const temMesa = input.precisa_mesa != null;
+      if (!temSala && !temMesa) {
+        return JSON.stringify({
+          ok: false,
+          motivo:
+            "Antes de agendar, pergunte ao cliente se ele vai precisar de mesa/apoio para notebook (ou qual sala prefere). NÃO escolha a sala sozinha sem essa resposta.",
+        });
+      }
+
       // Pagamento por SALDO de pacote (recorrente): resolve o pacote ativo no servidor.
       let pacoteClienteId: string | undefined;
       if (usarSaldo) {

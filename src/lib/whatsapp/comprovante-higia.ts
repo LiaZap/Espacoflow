@@ -203,7 +203,7 @@ export async function processarComprovanteHigia(params: {
       const enviada = await responder(
         params.conversaId,
         params.telefone,
-        "Seu pagamento já está confirmado ✅ Tá tudo certo, pode ficar tranquila(o). Te espero no horário combinado 🙌"
+        "Sua reserva já está confirmada ✅ Tá tudo certo, pode ficar tranquila(o). Te espero no horário combinado 🙌"
       );
       return { tratou: true, enviada, confirmada: true };
     }
@@ -399,8 +399,9 @@ export async function processarComprovanteHigia(params: {
     .innerJoin(salas, eq(reservas.sala_id, salas.id))
     .where(inArray(reservas.id, reservaIdsOk));
 
-  // 1) Confirmação (humanizada, natural).
-  const enviada = await responder(params.conversaId, params.telefone, "Pagamento confirmado! ✅");
+  // 1) Recebimento do comprovante. NÃO afirma "pagamento confirmado" (quem valida o
+  // pagamento é o sistema/equipe); o resumo abaixo confirma a RESERVA.
+  const enviada = await responder(params.conversaId, params.telefone, "Recebi seu comprovante! 🙏");
   // 2) Resumo formatado de cada reserva (mensagem única, no layout do espaço).
   for (const d of detalhes) {
     await responderUnico(params.conversaId, params.telefone, resumoReservaTexto(d));
