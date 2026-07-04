@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ordenarSalasPorPreferencia } from "./agendar";
+import { ordenarSalasPorPreferencia, casaSalaNome } from "./agendar";
 
 // Cenário do espaço: Sala 02 = sem mesa (psicólogo); Sala 01/03/04 = com mesa.
 const SALAS = [
@@ -35,5 +35,21 @@ describe("roteamento de sala por necessidade de mesa", () => {
     const orig = [...SALAS];
     ordenarSalasPorPreferencia(SALAS, false);
     expect(SALAS).toEqual(orig);
+  });
+});
+
+describe("casaSalaNome (honra a sala escolhida pelo cliente)", () => {
+  it("casa por número mesmo com nomes diferentes", () => {
+    expect(casaSalaNome("Sala Privativa 03", "Sala 03")).toBe(true);
+    expect(casaSalaNome("Sala 03", "03")).toBe(true);
+    expect(casaSalaNome("Sala 03", "3")).toBe(true);
+    expect(casaSalaNome("Sala 01", "sala 01")).toBe(true);
+  });
+  it("NÃO casa salas diferentes", () => {
+    expect(casaSalaNome("Sala 02", "Sala 03")).toBe(false);
+    expect(casaSalaNome("Sala Privativa 03", "Sala 02")).toBe(false);
+  });
+  it("pedido vazio não casa", () => {
+    expect(casaSalaNome("Sala 03", "")).toBe(false);
   });
 });

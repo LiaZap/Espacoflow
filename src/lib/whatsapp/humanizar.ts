@@ -1,6 +1,7 @@
 import type { WhatsappProvider } from "./provider";
 
-const MAX_BLOCO = 180; // caracteres por mensagem (bloco curto, como gente)
+const MAX_BLOCO = 240; // caracteres por mensagem (bloco curto, como gente)
+const COALESCE_ATE = 120; // junta um bloco curto ao anterior se ele tiver menos que isto
 const CHARS_POR_SEG = 14; // velocidade de "digitação"
 const DELAY_LEITURA_MS = 1500; // pausa inicial ("lendo")
 const MIN_MS = 700;
@@ -27,9 +28,14 @@ export function limparTextoHigia(texto: string): string {
     .trim();
 }
 
+/** true se o bloco NÃO tem texto real (só emoji/pontuação/símbolo/espaço). */
+function semTexto(s: string): boolean {
+  return !/[\p{L}\p{N}]/u.test(s);
+}
+
 /** Quebra um texto em blocos curtos (parágrafos → sentenças), como um humano envia. */
 export function picarMensagem(texto: string, max = MAX_BLOCO): string[] {
-  const blocos: string[] = [];
+  const brutos: string[] = [];
   const paras = texto
     .split(/\n{2,}/)
     .map((s) => s.trim())
@@ -37,20 +43,38 @@ export function picarMensagem(texto: string, max = MAX_BLOCO): string[] {
 
   for (const p of paras) {
     if (p.length <= max) {
-      blocos.push(p);
+      brutos.push(p);
       continue;
     }
     const sentencas = p.split(/(?<=[.!?…])\s+/);
     let buf = "";
     for (const s of sentencas) {
       if (buf && `${buf} ${s}`.trim().length > max) {
-        blocos.push(buf.trim());
+        brutos.push(buf.trim());
         buf = s;
       } else {
         buf = buf ? `${buf} ${s}` : s;
       }
     }
-    if (buf.trim()) blocos.push(buf.trim());
+    if (buf.trim()) brutos.push(buf.trim());
+  }
+
+  // Pós-processo: (1) bloco só-emoji/pontuação NÃO vira mensagem solta — cola no anterior;
+  // (2) junta blocos curtos adjacentes p/ não fragmentar demais (mantendo abaixo de `max`).
+  const blocos: string[] = [];
+  for (const b of brutos) {
+    const t = b.trim();
+    if (!t) continue;
+    if (semTexto(t)) {
+      if (blocos.length) blocos[blocos.length - 1] = `${blocos[blocos.length - 1]} ${t}`.trim();
+      continue; // sem bloco anterior → descarta emoji/pontuação solta
+    }
+    const ult = blocos[blocos.length - 1];
+    if (ult && ult.length < COALESCE_ATE && `${ult} ${t}`.length <= max) {
+      blocos[blocos.length - 1] = `${ult} ${t}`;
+    } else {
+      blocos.push(t);
+    }
   }
   return blocos.length ? blocos : [texto.trim()];
 }
@@ -83,6 +107,7 @@ export async function enviarHumanizado(
 
   for (let i = 0; i < blocos.length; i++) {
     const bloco = blocos[i];
+    if (!bloco?.trim()) continue; // defensivo: nunca envia bloco vazio
     await provider.definirPresenca(telefone, "composing").catch(() => undefined);
     const tempo = Math.min(MAX_MS, Math.max(MIN_MS, (bloco.length / CHARS_POR_SEG) * 1000));
     await esperar(jitter(tempo));

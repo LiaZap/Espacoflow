@@ -6,7 +6,7 @@ import { sincronizarReserva, removerEventoReserva } from "@/lib/google/calendar"
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { creditarCancelamentoEmTx } from "./pacote-saldo";
 import { calcularJanela } from "./disponibilidade";
-import { janelaSanitizada, STATUS_LIVRES } from "./agendar";
+import { janelaSanitizada, STATUS_LIVRES, casaSalaNome } from "./agendar";
 
 class ReservaAgenteError extends Error {}
 
@@ -104,14 +104,14 @@ export async function cancelarReservaAgente(
 }
 
 /**
- * Remarca (altera data/hora) uma reserva DO cliente, MANTENDO a mesma duração e sala
- * (sem mexer no saldo). Checa disponibilidade da sala na nova janela e atualiza o Google.
+ * Altera uma reserva DO cliente: remarca data/hora E/OU troca de sala, MANTENDO a duração
+ * (sem mexer no saldo). Campos omitidos ficam como estão. Checa conflito na sala destino e
+ * atualiza o Google. A Hígia resolve troca de sala sozinha (não escala).
  */
 export async function alterarReservaAgente(
   clienteId: string,
   reservaId: string,
-  novaData: string,
-  novaHora: string
+  opts: { novaData?: string; novaHora?: string; novaSalaNome?: string }
 ): Promise<{ ok?: true; erro?: string; mensagem?: string }> {
   try {
     const out = await db.transaction(async (tx) => {
@@ -128,18 +128,42 @@ export async function alterarReservaAgente(
       }
       if (rv.status_reserva === "concluida") throw new ReservaAgenteError("Essa reserva já foi concluída.");
 
-      const invalido = janelaSanitizada(novaData, novaHora, rv.duracao_min);
+      // Campos omitidos mantêm o valor atual da reserva.
+      const dataAlvo = opts.novaData?.trim() || rv.data;
+      const horaAlvo = opts.novaHora?.trim() || (rv.hora ?? "").slice(0, 5);
+
+      // Resolve a sala destino (troca de sala) ou mantém a atual.
+      let salaAlvoId = rv.sala_id;
+      let salaAlvoNome: string | undefined;
+      if (opts.novaSalaNome?.trim()) {
+        const ativas = await tx
+          .select({ id: salas.id, nome: salas.nome })
+          .from(salas)
+          .where(and(eq(salas.is_deleted, false), eq(salas.ativa, true)));
+        const alvo = ativas.find((s) => casaSalaNome(s.nome, opts.novaSalaNome!));
+        if (!alvo) throw new ReservaAgenteError(`Não encontrei a sala "${opts.novaSalaNome}". Me diz qual sala você quer.`);
+        salaAlvoId = alvo.id;
+        salaAlvoNome = alvo.nome;
+      }
+
+      const mudouSala = salaAlvoId !== rv.sala_id;
+      const mudouHorario = dataAlvo !== rv.data || horaAlvo !== (rv.hora ?? "").slice(0, 5);
+      if (!mudouSala && !mudouHorario) {
+        throw new ReservaAgenteError("Me diz o que você quer mudar: a data/horário ou a sala?");
+      }
+
+      const invalido = janelaSanitizada(dataAlvo, horaAlvo, rv.duracao_min);
       if (invalido) throw new ReservaAgenteError(invalido);
-      const { inicio, fim } = calcularJanela(novaData, novaHora, rv.duracao_min);
+      const { inicio, fim } = calcularJanela(dataAlvo, horaAlvo, rv.duracao_min);
       if (inicio.getTime() <= Date.now()) throw new ReservaAgenteError("Esse horário já passou — escolha um futuro.");
 
-      // Conflito na MESMA sala (excluindo a própria reserva).
+      // Conflito na sala DESTINO (excluindo a própria reserva).
       const conflito = await tx
         .select({ id: reservas.id })
         .from(reservas)
         .where(
           and(
-            eq(reservas.sala_id, rv.sala_id),
+            eq(reservas.sala_id, salaAlvoId),
             eq(reservas.is_deleted, false),
             ne(reservas.id, rv.id),
             notInArray(reservas.status_reserva, STATUS_LIVRES),
@@ -148,30 +172,37 @@ export async function alterarReservaAgente(
           )
         );
       if (conflito.length > 0) {
-        throw new ReservaAgenteError("Esse novo horário não está livre nessa sala. Quer tentar outro?");
+        throw new ReservaAgenteError(
+          mudouSala
+            ? "Essa sala não está livre nesse horário. Quer que eu veja outra sala ou outro horário?"
+            : "Esse novo horário não está livre nessa sala. Quer tentar outro?"
+        );
       }
-      const [s] = await tx.select({ nome: salas.nome }).from(salas).where(eq(salas.id, rv.sala_id));
+      if (!salaAlvoNome) {
+        const [s] = await tx.select({ nome: salas.nome }).from(salas).where(eq(salas.id, salaAlvoId));
+        salaAlvoNome = s?.nome ?? "sua sala";
+      }
       await tx
         .update(reservas)
-        .set({ data: novaData, hora: novaHora, inicio_em: inicio, fim_em: fim, updated_at: new Date() })
+        .set({ data: dataAlvo, hora: horaAlvo, inicio_em: inicio, fim_em: fim, sala_id: salaAlvoId, updated_at: new Date() })
         .where(eq(reservas.id, rv.id));
-      return { sala: s?.nome ?? "sua sala" };
+      return { sala: salaAlvoNome, data: dataAlvo, hora: horaAlvo, mudouSala };
     });
 
     await registrarAuditoria({
       acao: "atualizar",
       entidade: "reservas",
       registroId: reservaId,
-      detalhes: `Hígia remarcou reserva para ${novaData} ${novaHora}.`,
+      detalhes: `Hígia alterou reserva para ${out.data} ${out.hora} na ${out.sala}${out.mudouSala ? " (trocou de sala)" : ""}.`,
     }).catch(() => undefined);
     await sincronizarReserva(reservaId).catch(() => undefined); // atualiza o evento no Google
 
-    return { ok: true, mensagem: `Pronto! Remarquei pra ${novaData} às ${novaHora} na ${out.sala} ✅` };
+    return { ok: true, mensagem: `Pronto! Sua reserva agora é ${out.data} às ${out.hora} na ${out.sala} ✅` };
   } catch (e: unknown) {
     if (e instanceof ReservaAgenteError) return { erro: e.message };
     if (typeof e === "object" && e !== null && "code" in e && (e as { code: string }).code === "23P01") {
       return { erro: "Esse horário acabou de ser ocupado — tente outro." };
     }
-    return { erro: "Não consegui remarcar agora — tente de novo." };
+    return { erro: "Não consegui alterar agora — tente de novo." };
   }
 }

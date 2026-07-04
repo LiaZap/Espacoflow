@@ -81,7 +81,13 @@ export async function limparDadosTesteWhatsapp(): Promise<{ erro?: string; ok?: 
     await tx.update(clientesPacotes).set(soft()).where(inArray(clientesPacotes.cliente_id, ids));
     await tx.update(clientesAnotacoes).set(soft()).where(inArray(clientesAnotacoes.cliente_id, ids));
     await tx.update(clientesConsentimentos).set(soft()).where(inArray(clientesConsentimentos.cliente_id, ids));
-    await tx.update(clientes).set(soft()).where(inArray(clientes.id, ids));
+    // Reset de verdade: ao reativar (nova mensagem), o número volta como CLIENTE NOVO —
+    // status "novo" e sem qualificação/aceite. Senão o gate o trataria como recorrente e
+    // pularia o cadastro/aceite (ruído nos testes de "cliente novo").
+    await tx
+      .update(clientes)
+      .set({ ...soft(), status_lead: "novo", perfil_qualificado_em: null, aceitou_politica_em: null })
+      .where(inArray(clientes.id, ids));
   });
 
   for (const r of comEvento) await removerEventoReserva(r.id).catch(() => undefined);

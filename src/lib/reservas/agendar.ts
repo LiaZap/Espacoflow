@@ -39,6 +39,24 @@ export function ordenarSalasPorPreferencia<T extends { prioridade: number | null
   return [...livres].sort((a, b) => pref(a) - pref(b) || (a.prioridade ?? 99) - (b.prioridade ?? 99));
 }
 
+/**
+ * Casa o nome da sala pedido pelo cliente com o nome cadastrado, tolerante a variações:
+ * "Sala 03" ~ "Sala Privativa 03" ~ "03" ~ "3" (compara o NÚMERO da sala) e também
+ * por igualdade/inclusão do texto normalizado. Serve p/ honrar a escolha explícita do cliente.
+ */
+export function casaSalaNome(nome: string, pedido: string): boolean {
+  const norm = (s: string) =>
+    (s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+  const n = norm(nome);
+  const p = norm(pedido);
+  if (!p) return false;
+  if (n === p) return true;
+  const numN = nome.match(/\d+/)?.[0];
+  const numP = pedido.match(/\d+/)?.[0];
+  if (numN && numP && parseInt(numN, 10) === parseInt(numP, 10)) return true;
+  return n.includes(p) || p.includes(n);
+}
+
 export function janelaSanitizada(data: string, hora: string, duracaoMin: number): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) return "Data inválida (use AAAA-MM-DD).";
   // Hora 00:00–23:59 (regex de formato aceitaria 19:99/25:00 — barramos aqui).
@@ -120,6 +138,8 @@ export async function agendarReservaAgente(input: {
   duracaoMin: number;
   finalidade?: string;
   salaId?: string;
+  /** Nome da sala que o cliente escolheu explicitamente (tem prioridade sobre precisaMesa). */
+  salaNome?: string;
   valor?: number;
   precisaMesa?: boolean;
   /** Se informado, paga a reserva debitando esse pacote (sem Pix) — recorrente com saldo. */
@@ -172,7 +192,7 @@ export async function agendarReservaAgente(input: {
     }
     if (!cli.aceitou) {
       return {
-        erro: "Antes de agendar, o cliente novo precisa aceitar a política: envie o formulário de cadastro e registre o aceite com a ferramenta aceitar_politica.",
+        erro: "Antes de agendar, o cliente novo precisa preencher o formulário de cadastro e aceitar a política. Envie o link do formulário e, quando ele disser que preencheu, chame confirmar_cadastro (eu valido pela planilha). O aceite só vale pela planilha — não dá pra registrar só porque o cliente diz 'aceito' no chat.",
       };
     }
   }
@@ -259,12 +279,26 @@ export async function agendarReservaAgente(input: {
         input.precisaMesa
       );
 
-      // Se pediram uma sala específica, respeita (se livre); senão pega a 1ª por prioridade.
-      const escolhida = input.salaId ? livres.find((s) => s.id === input.salaId) : livres[0];
-      if (!escolhida) {
-        if (input.salaId) throw new ReservaIndisponivel("A sala pedida não está livre nesse horário.");
-        throw new ReservaIndisponivel("Nenhuma sala livre nesse horário.");
+      // Escolha da sala. Prioridade: id explícito > nome pedido pelo cliente > regra de mesa.
+      // A escolha EXPLÍCITA do cliente (salaNome) vence o roteamento por mesa.
+      let escolhida: (typeof livres)[number] | undefined;
+      if (input.salaId) {
+        escolhida = livres.find((s) => s.id === input.salaId);
+        if (!escolhida) throw new ReservaIndisponivel("A sala pedida não está livre nesse horário.");
+      } else if (input.salaNome) {
+        const alvo = ativas.find((s) => casaSalaNome(s.nome, input.salaNome!));
+        if (alvo) {
+          escolhida = livres.find((s) => s.id === alvo.id);
+          if (!escolhida) {
+            throw new ReservaIndisponivel(`A ${alvo.nome} não está livre nesse horário. Posso ver outra sala pra você?`);
+          }
+        } else {
+          escolhida = livres[0]; // nome não reconhecido → escolhe pela preferência de mesa
+        }
+      } else {
+        escolhida = livres[0];
       }
+      if (!escolhida) throw new ReservaIndisponivel("Nenhuma sala livre nesse horário.");
 
       // Pagamento por PACOTE (recorrente com saldo): debita ANTES de inserir, e a reserva
       // já nasce CONFIRMADA/paga (sem Pix). Senão, hold pendente de Pix (fluxo normal).

@@ -6,7 +6,7 @@ import {
   cancelarReservaAgente,
   alterarReservaAgente,
 } from "@/lib/reservas/agente-recorrente";
-import { registrarQualificacao, registrarAceitePolitica, confirmarCadastroPlanilha } from "./onboarding";
+import { registrarQualificacao, confirmarCadastroPlanilha } from "./onboarding";
 
 /** Definições das ferramentas (formato tool use da Anthropic) que a Hígia pode chamar. */
 export const FERRAMENTAS_AGENDA = [
@@ -52,21 +52,9 @@ export const FERRAMENTAS_AGENDA = [
     },
   },
   {
-    name: "aceitar_politica",
-    description:
-      "Registra o aceite da política de uso (cadastro) do cliente. Chame quando o cliente confirmar que aceita a política (depois de você ter enviado o link do formulário de cadastro). É obrigatório para um cliente NOVO antes de agendar.",
-    input_schema: {
-      type: "object",
-      properties: {
-        concordo: { type: "boolean", description: "true quando o cliente confirma que aceita a política de uso" },
-      },
-      required: ["concordo"],
-    },
-  },
-  {
     name: "confirmar_cadastro",
     description:
-      "Valida o cadastro do cliente NOVO lendo a planilha do formulário (casa pelo telefone) e registra o aceite da política. Use quando o cliente disser que preencheu o formulário de cadastro. Se não encontrar, peça para ele confirmar o número de WhatsApp usado no formulário.",
+      "ÚNICA forma de registrar o aceite da política de um cliente NOVO: valida o cadastro lendo a planilha do formulário (casa pelo telefone). Use quando o cliente disser que preencheu o formulário. Se não encontrar, peça para ele confirmar o número de WhatsApp usado no formulário. O aceite NÃO pode ser registrado só porque o cliente diz 'aceito' no chat — ele precisa preencher o formulário.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -89,7 +77,7 @@ export const FERRAMENTAS_AGENDA = [
   {
     name: "agendar_reserva",
     description:
-      "Cria uma reserva PROVISÓRIA (hold) para o cliente desta conversa, pendente de Pix. Chame UMA VEZ POR SESSÃO (cada horário/dia é uma reserva separada). Use depois de checar a disponibilidade e o cliente concordar. Para cliente NOVO, só funciona se você já tiver chamado qualificar_cliente e aceitar_politica. O sistema escolhe a sala livre (respeitando precisa_mesa). A confirmação é automática quando o cliente enviar o comprovante (não depende da equipe).",
+      "Cria uma reserva PROVISÓRIA (hold) para o cliente desta conversa, pendente de Pix. Chame UMA VEZ POR SESSÃO (cada horário/dia é uma reserva separada). Use depois de checar a disponibilidade e o cliente concordar. Para cliente NOVO, só funciona se você já tiver chamado qualificar_cliente e o cadastro/aceite já estiver confirmado (confirmar_cadastro). Se o cliente ESCOLHEU uma sala específica, informe em `sala`; senão o sistema escolhe pela necessidade de mesa. A confirmação é automática quando o cliente enviar o comprovante (não depende da equipe).",
     input_schema: {
       type: "object",
       properties: {
@@ -100,10 +88,15 @@ export const FERRAMENTAS_AGENDA = [
           type: "string",
           description: "Para que o cliente vai usar a sala (ex.: atendimento, reunião, mentoria)",
         },
+        sala: {
+          type: "string",
+          description:
+            "Nome EXATO da sala que o cliente escolheu explicitamente (ex.: 'Sala 03' ou como veio em consultar_disponibilidade). Deixe vazio para o sistema escolher pela necessidade de mesa. Se o cliente pediu uma sala, a escolha dele TEM prioridade sobre a regra de mesa.",
+        },
         precisa_mesa: {
           type: "boolean",
           description:
-            "true se o cliente vai precisar de mesa/escrivaninha (ex.: apoio para notebook). false para terapia de conversa (psicólogo → Sala 02 sem mesa). Pergunte ao cliente se não souber.",
+            "true se o cliente vai precisar de mesa/escrivaninha (ex.: apoio para notebook). false para terapia de conversa (psicólogo → Sala 02 sem mesa). Só é usado quando o cliente NÃO escolheu uma sala em `sala`. Pergunte ao cliente se não souber.",
         },
         usar_saldo: {
           type: "boolean",
@@ -146,15 +139,19 @@ export const FERRAMENTAS_AGENDA = [
   {
     name: "alterar_reserva",
     description:
-      "Remarca uma reserva do cliente para nova data/hora (mantém a MESMA duração e sala). Use o reserva_id de listar_minhas_reservas. Verifica disponibilidade antes de mover.",
+      "Remarca a data/hora E/OU troca a SALA de uma reserva do cliente (mantém a duração). Use o reserva_id de listar_minhas_reservas. Verifica disponibilidade/conflito antes de mover. Para só trocar de sala mantendo o horário, informe apenas nova_sala. VOCÊ resolve isso sozinha — nunca escale troca de sala para a equipe.",
     input_schema: {
       type: "object",
       properties: {
-        reserva_id: { type: "string", description: "ID da reserva a remarcar (de listar_minhas_reservas)" },
-        nova_data: { type: "string", description: "Nova data no formato AAAA-MM-DD" },
-        nova_hora: { type: "string", description: "Novo horário de início HH:MM (24h)" },
+        reserva_id: { type: "string", description: "ID da reserva a alterar (de listar_minhas_reservas)" },
+        nova_data: { type: "string", description: "Nova data AAAA-MM-DD (omita para manter a data atual)" },
+        nova_hora: { type: "string", description: "Novo horário de início HH:MM 24h (omita para manter o horário atual)" },
+        nova_sala: {
+          type: "string",
+          description: "Nome da sala destino (ex.: 'Sala 03') quando o cliente quer TROCAR de sala. Omita para manter a mesma sala.",
+        },
       },
-      required: ["reserva_id", "nova_data", "nova_hora"],
+      required: ["reserva_id"],
     },
   },
 ] as const;
@@ -218,12 +215,6 @@ export async function executarFerramentaAgenda(
       });
     }
 
-    if (nome === "aceitar_politica") {
-      const r = await registrarAceitePolitica({ clienteId: ctx.clienteId, concordo: bool(input.concordo) });
-      if (!r.ok) return JSON.stringify({ ok: false, motivo: r.mensagem });
-      return JSON.stringify({ ok: true, registrado: true, proximo_passo: "Aceite registrado. Pode seguir para a reserva e o Pix." });
-    }
-
     if (nome === "confirmar_cadastro") {
       const r = await confirmarCadastroPlanilha(ctx.clienteId);
       if (r.ok) {
@@ -234,10 +225,12 @@ export async function executarFerramentaAgenda(
         });
       }
       if (r.fallback) {
+        // Planilha indisponível: NÃO registramos aceite sem prova (planilha é a prova).
         return JSON.stringify({
           ok: false,
           motivo: r.mensagem,
-          instrucao: "Não deu pra validar pela planilha agora. Peça ao cliente que confirme o aceite aqui e registre com aceitar_politica.",
+          instrucao:
+            "Não consegui validar o cadastro agora. Peça ao cliente que confirme que preencheu o formulário com ESTE número de WhatsApp e tente confirmar_cadastro de novo. NÃO agende sem o cadastro validado.",
         });
       }
       return JSON.stringify({ ok: false, motivo: r.mensagem });
@@ -283,6 +276,7 @@ export async function executarFerramentaAgenda(
         hora: str(input.hora),
         duracaoMin,
         finalidade: input.finalidade ? str(input.finalidade) : undefined,
+        salaNome: input.sala != null && str(input.sala).trim() ? str(input.sala).trim() : undefined,
         valor: usarSaldo ? undefined : valor,
         precisaMesa: input.precisa_mesa != null ? bool(input.precisa_mesa) : undefined,
         pacoteClienteId,
@@ -303,7 +297,7 @@ export async function executarFerramentaAgenda(
         ok: true,
         reserva: { sala: r.salaNome, data: r.data, hora: r.hora, duracao_min: r.duracaoMin },
         proximo_passo:
-          "Horário SEGURADO. Diga ao cliente que você já segurou o horário dele (NÃO use a palavra 'provisória'). Depois de agendar TODAS as sessões pedidas, envie o Pix (marcador [PIX]) e peça o comprovante aqui. Quando o comprovante chegar, o sistema confirma tudo automaticamente — não diga que a equipe confirma nem que já está pago.",
+          "Horário SEGURADO. Confirme ao cliente a DATA, o HORÁRIO e A SALA (use reserva.sala — sempre diga em qual sala ficou). Diga que você já segurou o horário dele (NÃO use a palavra 'provisória'). Depois de agendar TODAS as sessões pedidas, envie o Pix (marcador [PIX]) e peça o comprovante aqui. Quando o comprovante chegar, o sistema confirma tudo automaticamente — não diga que a equipe confirma nem que já está pago.",
       });
     }
 
@@ -338,7 +332,11 @@ export async function executarFerramentaAgenda(
     }
 
     if (nome === "alterar_reserva") {
-      const r = await alterarReservaAgente(ctx.clienteId, str(input.reserva_id), str(input.nova_data), str(input.nova_hora));
+      const r = await alterarReservaAgente(ctx.clienteId, str(input.reserva_id), {
+        novaData: input.nova_data != null && str(input.nova_data).trim() ? str(input.nova_data).trim() : undefined,
+        novaHora: input.nova_hora != null && str(input.nova_hora).trim() ? str(input.nova_hora).trim() : undefined,
+        novaSalaNome: input.nova_sala != null && str(input.nova_sala).trim() ? str(input.nova_sala).trim() : undefined,
+      });
       if (r.erro) return JSON.stringify({ ok: false, motivo: r.erro });
       return JSON.stringify({ ok: true, mensagem_para_o_cliente: r.mensagem });
     }
