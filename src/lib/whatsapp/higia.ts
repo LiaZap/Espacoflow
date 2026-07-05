@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { whatsappConversas, whatsappMensagens } from "@/lib/db/schema/whatsapp";
 import { agenteConfig } from "@/lib/db/schema/agente";
@@ -300,6 +300,23 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     }
   }
 
+  // Fotos já enviadas NESTA conversa (dedupe cross-turno) — não reenvia a mesma imagem.
+  const fotosJaEnviadas = new Set(
+    (
+      await db
+        .select({ url: whatsappMensagens.midia_url })
+        .from(whatsappMensagens)
+        .where(
+          and(
+            eq(whatsappMensagens.conversa_id, conversaId),
+            eq(whatsappMensagens.tipo, "image"),
+            eq(whatsappMensagens.is_deleted, false),
+            isNotNull(whatsappMensagens.midia_url)
+          )
+        )
+    ).map((r) => r.url as string)
+  );
+
   // Fotos/arquivos pedidos pela Hígia (resolvidos na biblioteca agente_midia).
   for (const token of tokens) {
     const m = await resolverMidia(token);
@@ -317,10 +334,12 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     }
     const tipo = tipoWhatsapp(m.tipo_arquivo);
     const url = urlMidiaAbsoluta(m.arquivo_url);
-    // Foto vai com a IDENTIFICAÇÃO curta da sala (ex.: "Sala 01") — o cliente precisa
-    // saber qual é qual pra escolher. Usa o NOME (não a descrição longa, que confundia).
     const ehFoto = tipo === "image";
-    const legenda = ehFoto ? m.nome : m.descricao || m.nome;
+    // #5: não reenvia foto já mandada nesta conversa (dedupe por URL).
+    if (ehFoto && fotosJaEnviadas.has(url)) continue;
+    if (ehFoto) fotosJaEnviadas.add(url);
+    // #6: fotos das salas vão SEM legenda (evita identificação errada/duplicada).
+    const legenda = ehFoto ? undefined : m.descricao || m.nome;
     await provider.definirPresenca(telefone, "composing").catch(() => undefined);
     const envio = await provider.enviarMidia(telefone, {
       tipo,

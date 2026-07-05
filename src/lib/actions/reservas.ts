@@ -44,7 +44,9 @@ export async function listarReservas() {
     .from(reservas)
     .innerJoin(salas, eq(reservas.sala_id, salas.id))
     .innerJoin(clientes, eq(reservas.cliente_id, clientes.id))
-    .where(eq(reservas.is_deleted, false))
+    // Canceladas NÃO aparecem na lista de ocupação: o horário foi liberado (a
+    // disponibilidade e o board já ignoram cancelada). O histórico segue na auditoria.
+    .where(and(eq(reservas.is_deleted, false), notInArray(reservas.status_reserva, ["cancelada"])))
     .orderBy(desc(reservas.inicio_em));
 }
 

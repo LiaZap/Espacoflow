@@ -1,5 +1,5 @@
 import { consultarDisponibilidadeAgente, agendarReservaAgente } from "@/lib/reservas/agendar";
-import { calcularPrecoAvulsa } from "@/lib/reservas/preco";
+import { calcularPrecoAvulsa, precoAvulsaDiaDetalhe } from "@/lib/reservas/preco";
 import { pacoteAtivoDoCliente } from "@/lib/reservas/pacote-saldo";
 import {
   listarReservasFuturasCliente,
@@ -181,8 +181,22 @@ export async function executarFerramentaAgenda(
       const sessoes = lista.map((s) => ({ data: str(s.data), horas: num(s.horas) }));
       if (sessoes.length === 0) return JSON.stringify({ ok: false, motivo: "sem sessões para calcular" });
       const r = calcularPrecoAvulsa(sessoes);
+      if (!r.exato) {
+        // Alguma duração não existe na tabela (ex.: 1h30) — NÃO inventar valor proporcional.
+        const foraDaTabela = r.porDia
+          .filter((d) => !d.exato)
+          .map((d) => ({ data: d.data, horas: d.horas, opcoes: d.vizinhas ?? [] }));
+        return JSON.stringify({
+          ok: true,
+          valor_exato: false,
+          fora_da_tabela: foraDaTabela,
+          instrucao:
+            "Uma ou mais durações NÃO existem na tabela. NUNCA invente valor proporcional. Ofereça ao cliente as opções tabeladas mais próximas (ex.: '1h por R$40 ou 2h por R$65') e peça pra ele escolher uma delas.",
+        });
+      }
       return JSON.stringify({
         ok: true,
+        valor_exato: true,
         total: r.total,
         por_dia: r.porDia,
         observacao:
@@ -271,6 +285,19 @@ export async function executarFerramentaAgenda(
           return JSON.stringify({ ok: false, motivo: "O cliente não tem pacote com saldo ativo — siga pelo Pix (avulsa)." });
         }
         pacoteClienteId = pac.id;
+      }
+
+      // Avulsa (Pix): só agenda durações que existem na tabela. 1h30 e afins → oferecer
+      // as opções vizinhas, sem inventar valor proporcional (nem criar reserva sem preço).
+      if (!usarSaldo) {
+        const det = precoAvulsaDiaDetalhe(duracaoMin / 60);
+        if (!det.exato) {
+          const ops = (det.vizinhas ?? []).map((v) => `${v.horas}h por R$ ${v.valor}`).join(" ou ");
+          return JSON.stringify({
+            ok: false,
+            motivo: `Essa duração não tem preço de tabela. Ofereça ao cliente: ${ops}. NÃO invente valor; peça pra ele escolher uma dessas durações e agende com ela.`,
+          });
+        }
       }
 
       let valor = input.valor != null ? num(input.valor) : undefined;

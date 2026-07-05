@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, ne, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pagamentos } from "@/lib/db/schema/pagamentos";
 import { reservas } from "@/lib/db/schema/reservas";
@@ -289,6 +289,26 @@ export async function processarComprovanteHigia(params: {
   // não somem em silêncio — vão para em_análise + auditoria (a equipe verifica).
   const idsMortos = ids.filter((id) => !idsOk.includes(id));
 
+  // Cliente é NOVO se NÃO tem outra reserva confirmada/concluída fora deste lote.
+  // (Calculado ANTES da transação que confirma o lote.) Só cliente novo recebe o
+  // onboarding/boas-vindas; recorrente não recebe a mensagem de acesso a cada reserva.
+  const [outraConfirmada] =
+    reservaIdsOk.length > 0
+      ? await db
+          .select({ id: reservas.id })
+          .from(reservas)
+          .where(
+            and(
+              eq(reservas.cliente_id, params.clienteId),
+              eq(reservas.is_deleted, false),
+              inArray(reservas.status_reserva, ["confirmada", "concluida"]),
+              notInArray(reservas.id, reservaIdsOk)
+            )
+          )
+          .limit(1)
+      : [];
+  const clienteNovo = !outraConfirmada;
+
   if (reservaIdsOk.length === 0) {
     // Comprovante sem reserva ativa correspondente (cancelada/expirada) — não confirma às
     // cegas nem promete "garantida"; manda para em_análise e registra para a equipe.
@@ -406,12 +426,15 @@ export async function processarComprovanteHigia(params: {
   for (const d of detalhes) {
     await responderUnico(params.conversaId, params.telefone, resumoReservaTexto(d));
   }
-  // 3) Boas-vindas / onboarding com instruções de acesso — uma vez por sala.
-  const salasEnviadas = new Set<string>();
-  for (const d of detalhes) {
-    if (salasEnviadas.has(d.sala_id)) continue;
-    salasEnviadas.add(d.sala_id);
-    await enviarBoasVindas(d.id, params.conversaId, params.telefone);
+  // 3) Boas-vindas / onboarding com instruções de acesso — SÓ para cliente novo (1ª
+  // reserva confirmada), uma vez por sala. Recorrente não recebe de novo.
+  if (clienteNovo) {
+    const salasEnviadas = new Set<string>();
+    for (const d of detalhes) {
+      if (salasEnviadas.has(d.sala_id)) continue;
+      salasEnviadas.add(d.sala_id);
+      await enviarBoasVindas(d.id, params.conversaId, params.telefone);
+    }
   }
   return { tratou: true, enviada, confirmada: true };
 }

@@ -17,11 +17,14 @@ function round2(n: number): number {
 }
 
 /**
- * Preço avulso de UM dia. Usa os maiores blocos primeiro (mais baratos por hora) e
- * preenche o resto; nunca passa do valor da diária.
+ * Preço avulso de UM dia, SÓ para durações em horas INTEIRAS (blocos da tabela).
+ * Usa os maiores blocos primeiro (mais baratos por hora); nunca passa da diária.
+ * Duração fracionada (ex.: 1h30) NÃO tem preço de tabela — retorna 0 aqui; use
+ * precoAvulsaDiaDetalhe para tratar o caso "fora da tabela".
  */
 export function precoAvulsaDia(horas: number): number {
   if (!Number.isFinite(horas) || horas <= 0) return 0;
+  if (!Number.isInteger(horas)) return 0; // fração de hora não é tabelada
   let resto = horas;
   let total = 0;
   while (resto >= 4) {
@@ -36,8 +39,35 @@ export function precoAvulsaDia(horas: number): number {
     total += HORA_AVULSA;
     resto -= 1;
   }
-  if (resto > 0) total += HORA_AVULSA * resto; // fração de hora (prorata 40/h)
   return round2(Math.min(total, DIARIA));
+}
+
+export interface VizinhaPreco {
+  horas: number;
+  valor: number;
+}
+export interface PrecoDetalheDia {
+  /** false quando a duração não existe na tabela (ex.: 1h30). */
+  exato: boolean;
+  valor: number; // válido quando exato
+  /** opções tabeladas mais próximas (piso/teto) quando não é exato. */
+  vizinhas?: VizinhaPreco[];
+}
+
+/**
+ * Preço detalhado de UM dia: para horas inteiras devolve o valor exato; para durações
+ * fracionadas devolve exato=false + as opções tabeladas vizinhas (piso e teto), SEM
+ * inventar valor proporcional.
+ */
+export function precoAvulsaDiaDetalhe(horas: number): PrecoDetalheDia {
+  if (!Number.isFinite(horas) || horas <= 0) return { exato: true, valor: 0 };
+  if (Number.isInteger(horas)) return { exato: true, valor: precoAvulsaDia(horas) };
+  const piso = Math.floor(horas);
+  const teto = Math.ceil(horas);
+  const vizinhas: VizinhaPreco[] = [];
+  if (piso >= 1) vizinhas.push({ horas: piso, valor: precoAvulsaDia(piso) });
+  vizinhas.push({ horas: teto, valor: precoAvulsaDia(teto) });
+  return { exato: false, valor: 0, vizinhas };
 }
 
 export interface SessaoPreco {
@@ -48,10 +78,14 @@ export interface PrecoPorDia {
   data: string;
   horas: number;
   valor: number;
+  exato: boolean;
+  vizinhas?: VizinhaPreco[];
 }
 export interface ResultadoPreco {
   total: number;
   porDia: PrecoPorDia[];
+  /** false se ALGUM dia tem duração fora da tabela (não somável exatamente). */
+  exato: boolean;
 }
 
 /**
@@ -68,7 +102,14 @@ export function calcularPrecoAvulsa(sessoes: SessaoPreco[]): ResultadoPreco {
   }
   const porDia: PrecoPorDia[] = [...horasPorDia.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([data, horas]) => ({ data, horas: round2(horas), valor: precoAvulsaDia(horas) }));
-  const total = round2(porDia.reduce((acc, d) => acc + d.valor, 0));
-  return { total, porDia };
+    .map(([data, horas]) => {
+      const h = round2(horas);
+      const d = precoAvulsaDiaDetalhe(h);
+      return { data, horas: h, valor: d.valor, exato: d.exato, ...(d.vizinhas ? { vizinhas: d.vizinhas } : {}) };
+    });
+  const exato = porDia.every((d) => d.exato);
+  // Só soma dias com valor EXATO — dias fora da tabela não entram no total (o caller
+  // deve oferecer as opções vizinhas em vez de cobrar um valor inventado).
+  const total = round2(porDia.reduce((acc, d) => acc + (d.exato ? d.valor : 0), 0));
+  return { total, porDia, exato };
 }
