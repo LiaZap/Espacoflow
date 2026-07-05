@@ -87,7 +87,8 @@ export function janelaSanitizada(data: string, hora: string, duracaoMin: number)
 export async function consultarDisponibilidadeAgente(
   data: string,
   hora: string,
-  duracaoMin: number
+  duracaoMin: number,
+  opts?: { precisaMesa?: boolean; excluir?: string[] }
 ): Promise<{ erro?: string; livres?: SalaLivre[] }> {
   const invalido = janelaSanitizada(data, hora, duracaoMin);
   if (invalido) return { erro: invalido };
@@ -96,7 +97,7 @@ export async function consultarDisponibilidadeAgente(
   if (inicio.getTime() <= Date.now()) return { erro: "Esse horário já passou — sugira uma data/hora futura." };
 
   const ativas = await db
-    .select({ id: salas.id, nome: salas.nome })
+    .select({ id: salas.id, nome: salas.nome, prioridade: salas.prioridade_alocacao, tem_mesa: salas.tem_mesa })
     .from(salas)
     .where(and(eq(salas.is_deleted, false), eq(salas.ativa, true)));
 
@@ -112,7 +113,16 @@ export async function consultarDisponibilidadeAgente(
       )
     );
   const ocupado = new Set(ocupadas.map((o) => o.sala_id));
-  return { livres: ativas.filter((s) => !ocupado.has(s.id)) };
+
+  let livres = ativas.filter((s) => !ocupado.has(s.id));
+  // Filtra pela necessidade de mesa JÁ informada: precisa de mesa → elimina salas SEM mesa
+  // (ex.: Sala 02). Nunca ofertar sala incompatível com o perfil.
+  if (opts?.precisaMesa === true) livres = livres.filter((s) => s.tem_mesa);
+  // Exclui salas já recusadas pelo cliente (para oferecer a PRÓXIMA compatível).
+  if (opts?.excluir?.length) livres = livres.filter((s) => !opts.excluir!.some((n) => casaSalaNome(s.nome, n)));
+  // Ordena pela preferência (mesa + prioridade) — a 1ª é a recomendada (uma por vez).
+  const ordenadas = ordenarSalasPorPreferencia(livres, opts?.precisaMesa);
+  return { livres: ordenadas.map((s) => ({ id: s.id, nome: s.nome })) };
 }
 
 export interface AgendamentoOk {

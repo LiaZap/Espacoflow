@@ -61,7 +61,7 @@ export const FERRAMENTAS_AGENDA = [
   {
     name: "consultar_disponibilidade",
     description:
-      "Verifica quais salas estão livres para uma data, horário e duração. SEMPRE use antes de oferecer ou marcar um horário — nunca afirme disponibilidade sem checar aqui.",
+      "Verifica a disponibilidade e devolve UMA sala recomendada por vez (compatível com a necessidade de mesa). SEMPRE use antes de oferecer ou marcar um horário. NUNCA afirme disponibilidade sem checar. Passe precisa_mesa; se o cliente recusar a sala oferecida, chame de novo com essa sala em `excluir` para pegar a próxima.",
     input_schema: {
       type: "object",
       properties: {
@@ -70,6 +70,16 @@ export const FERRAMENTAS_AGENDA = [
         duracao_min: {
           type: "integer",
           description: "Duração em minutos (mínimo 60, em múltiplos de 30)",
+        },
+        precisa_mesa: {
+          type: "boolean",
+          description:
+            "true se o cliente precisa de mesa/apoio para notebook — o sistema NÃO oferece salas sem mesa (ex.: Sala 02). Sempre informe conforme a necessidade já dita pelo cliente.",
+        },
+        excluir: {
+          type: "array",
+          items: { type: "string" },
+          description: "Nomes de salas que o cliente já recusou (ex.: ['Sala 03']) — para o sistema recomendar a próxima.",
         },
       },
       required: ["data", "hora", "duracao_min"],
@@ -252,14 +262,32 @@ export async function executarFerramentaAgenda(
     }
 
     if (nome === "consultar_disponibilidade") {
-      const r = await consultarDisponibilidadeAgente(str(input.data), str(input.hora), num(input.duracao_min));
+      const r = await consultarDisponibilidadeAgente(str(input.data), str(input.hora), num(input.duracao_min), {
+        precisaMesa: input.precisa_mesa != null ? bool(input.precisa_mesa) : undefined,
+        excluir: Array.isArray(input.excluir) ? (input.excluir as unknown[]).map((x) => str(x)) : undefined,
+      });
       if (r.erro) return JSON.stringify({ ok: false, motivo: r.erro });
-      const nomes = (r.livres ?? []).map((s) => s.nome);
-      return JSON.stringify(
-        nomes.length > 0
-          ? { ok: true, disponivel: true, salas_livres: nomes }
-          : { ok: true, disponivel: false, aviso: "Nenhuma sala livre nesse horário — ofereça outro." }
-      );
+      const livres = r.livres ?? [];
+      if (livres.length === 0) {
+        return JSON.stringify({
+          ok: true,
+          disponivel: false,
+          aviso: "Nenhuma sala compatível livre nesse horário. Ofereça outro horário/dia. NÃO liste salas.",
+        });
+      }
+      // Recomenda UMA sala por vez (nunca a lista toda, nunca comparar salas entre si).
+      return JSON.stringify({
+        ok: true,
+        disponivel: true,
+        sala_recomendada: livres[0].nome,
+        tem_alternativa: livres.length > 1,
+        instrucao:
+          "Ofereça SOMENTE a sala_recomendada, uma por vez (ex.: 'a " +
+          livres[0].nome +
+          " está disponível, quer?'). NUNCA liste várias salas nem compare salas entre si. Se o cliente recusar, chame consultar_disponibilidade de novo com excluir=['" +
+          livres[0].nome +
+          "'] para pegar a próxima compatível.",
+      });
     }
 
     if (nome === "agendar_reserva") {
