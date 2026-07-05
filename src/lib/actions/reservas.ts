@@ -18,6 +18,7 @@ import {
   JORNADA_MIN,
 } from "@/lib/reservas/disponibilidade";
 import { sincronizarReserva, removerEventoReserva } from "@/lib/google/calendar";
+import { creditarCancelamentoReaisEmTx } from "@/lib/reservas/credito";
 import { exigirPermissao, primeiroErro } from "./_helpers";
 
 class ReservaError extends Error {}
@@ -240,6 +241,11 @@ export async function cancelarReserva(id: string): Promise<{ erro?: string }> {
             modified_by: sessao.userId,
           });
         }
+      }
+
+      // Reserva paga por Pix/crédito (não por pacote) → crédito em REAIS dentro da política.
+      if (!r.pacote_cliente_id) {
+        await creditarCancelamentoReaisEmTx(tx, { clienteId: r.cliente_id, reservaId: r.id, inicioEm: r.inicio_em });
       }
 
       await tx

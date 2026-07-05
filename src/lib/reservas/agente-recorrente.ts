@@ -5,6 +5,7 @@ import { salas } from "@/lib/db/schema/salas";
 import { sincronizarReserva, removerEventoReserva } from "@/lib/google/calendar";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { creditarCancelamentoEmTx } from "./pacote-saldo";
+import { creditarCancelamentoReaisEmTx } from "./credito";
 import { calcularJanela } from "./disponibilidade";
 import { janelaSanitizada, STATUS_LIVRES, casaSalaNome } from "./agendar";
 
@@ -70,32 +71,48 @@ export async function cancelarReservaAgente(
         .for("update");
       if (!rv) throw new ReservaAgenteError("Não encontrei essa reserva.");
       if (rv.cliente_id !== clienteId) throw new ReservaAgenteError("Essa reserva não é sua.");
-      if (rv.status_reserva === "cancelada") return { jaCancelada: true, horasCreditadas: 0 };
+      if (rv.status_reserva === "cancelada") return { jaCancelada: true, horasCreditadas: 0, reaisCreditados: 0 };
       if (rv.status_reserva === "concluida" || rv.status_reserva === "no_show") {
         throw new ReservaAgenteError("Essa reserva já passou — não dá pra cancelar.");
       }
       const horasCreditadas = await creditarCancelamentoEmTx(tx, rv);
+      // Reserva paga por Pix/crédito (não por pacote) → crédito em REAIS dentro da política.
+      const reaisCreditados = rv.pacote_cliente_id
+        ? 0
+        : await creditarCancelamentoReaisEmTx(tx, { clienteId, reservaId: rv.id, inicioEm: rv.inicio_em });
       await tx
         .update(reservas)
         .set({ status_reserva: "cancelada", updated_at: new Date() })
         .where(eq(reservas.id, rv.id));
-      return { jaCancelada: false, horasCreditadas };
+      return { jaCancelada: false, horasCreditadas, reaisCreditados };
     });
 
     if (!r.jaCancelada) {
+      const detCredito =
+        r.horasCreditadas > 0
+          ? ` (creditou ${r.horasCreditadas}h no pacote)`
+          : r.reaisCreditados > 0
+            ? ` (creditou R$ ${r.reaisCreditados.toFixed(2)} de crédito)`
+            : "";
       await registrarAuditoria({
         acao: "atualizar",
         entidade: "reservas",
         registroId: reservaId,
-        detalhes: `Hígia cancelou reserva${r.horasCreditadas > 0 ? ` (creditou ${r.horasCreditadas}h no pacote)` : ""}.`,
+        detalhes: `Hígia cancelou reserva${detCredito}.`,
       }).catch(() => undefined);
       await removerEventoReserva(reservaId).catch(() => undefined);
     }
 
-    const mensagem =
-      r.horasCreditadas > 0
-        ? `Reserva cancelada! Como foi com antecedência, devolvi ${r.horasCreditadas}h pro seu pacote 🙌`
-        : "Reserva cancelada! Qualquer coisa, é só me chamar 😊";
+    let mensagem: string;
+    if (r.horasCreditadas > 0) {
+      mensagem = `Reserva cancelada! Como foi com antecedência, devolvi ${r.horasCreditadas}h pro seu pacote 🙌`;
+    } else if (r.reaisCreditados > 0) {
+      mensagem = `Reserva cancelada! Como foi com antecedência, você ficou com R$ ${r.reaisCreditados
+        .toFixed(2)
+        .replace(".", ",")} de crédito pra usar numa próxima reserva 🙌`;
+    } else {
+      mensagem = "Reserva cancelada! Qualquer coisa, é só me chamar 😊";
+    }
     return { ok: true, mensagem, horasCreditadas: r.horasCreditadas };
   } catch (e: unknown) {
     if (e instanceof ReservaAgenteError) return { erro: e.message };

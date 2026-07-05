@@ -99,6 +99,37 @@ export const clientesPacotesMovimentos = pgTable(
   })
 );
 
+/**
+ * LEDGER de CRÉDITO em REAIS do cliente (append-only). Cancelamento dentro da política
+ * gera crédito (valor > 0, com validade); reservar consome (valor < 0). Saldo do cliente =
+ * SUM(valor) das entradas NÃO expiradas e não deletadas (piso 0). reserva_id é referência
+ * lógica (sem FK física p/ evitar ciclo de import). Optimistic via advisory lock por cliente.
+ */
+export const clientesCreditos = pgTable(
+  "clientes_creditos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    cliente_id: uuid("cliente_id")
+      .notNull()
+      .references(() => clientes.id, { onDelete: "restrict" }),
+    reserva_id: uuid("reserva_id"),
+    tipo: text("tipo").notNull(), // credito_cancelamento | debito_reserva | ajuste
+    valor: numeric("valor", { precision: 12, scale: 2 }).notNull(), // + crédito, - débito (R$)
+    expira_em: timestamp("expira_em"), // null = não expira (débitos/ajustes)
+    motivo: text("motivo"),
+
+    created_at: timestamp("created_at").notNull().defaultNow(),
+    updated_at: timestamp("updated_at").notNull().defaultNow(),
+    deleted_at: timestamp("deleted_at"),
+    is_deleted: boolean("is_deleted").notNull().default(false),
+    modified_by: uuid("modified_by"),
+  },
+  (t) => ({
+    clienteIdx: index("idx_creditos_cliente").on(t.cliente_id, t.is_deleted),
+  })
+);
+
 /** Política de cancelamento versionada (janela em horas e % de crédito devolvido). */
 export const politicaCancelamento = pgTable(
   "politica_cancelamento",
@@ -124,3 +155,4 @@ export type NovoPacote = typeof pacotes.$inferInsert;
 export type ClientePacote = typeof clientesPacotes.$inferSelect;
 export type ClientePacoteMovimento = typeof clientesPacotesMovimentos.$inferSelect;
 export type PoliticaCancelamento = typeof politicaCancelamento.$inferSelect;
+export type ClienteCredito = typeof clientesCreditos.$inferSelect;

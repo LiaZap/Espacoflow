@@ -8,6 +8,9 @@ import { sincronizarReserva } from "@/lib/google/calendar";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { calcularJanela, ABRE_MIN, JORNADA_MIN } from "./disponibilidade";
 import { debitarPacoteEmTx, registrarDebitoEmTx, SaldoError } from "./pacote-saldo";
+import { saldoCreditoEmTx, debitarCreditoEmTx } from "./credito";
+
+const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 /** Reservas que NÃO bloqueiam o horário (não contam como conflito). */
 export const STATUS_LIVRES = ["cancelada", "no_show", "rascunho"];
@@ -123,6 +126,14 @@ export interface AgendamentoOk {
   viaPacote?: boolean;
   /** saldo de horas restante no pacote, quando pago via pacote. */
   saldoApos?: number;
+  /** crédito em R$ aplicado automaticamente nesta reserva (0/undefined se nenhum). */
+  creditoAplicado?: number;
+  /** valor que ainda falta pagar por Pix (0 = totalmente coberto por crédito/pacote). */
+  diferenca?: number;
+  /** true se usou crédito em R$ (total ou parcial). */
+  viaCredito?: boolean;
+  /** true se a reserva já está PAGA (pacote ou crédito cobriu tudo) — não pedir Pix. */
+  jaPago?: boolean;
 }
 
 /**
@@ -207,7 +218,12 @@ export async function agendarReservaAgente(input: {
       // (não filtra por status_pagamento: assim um retry de reserva paga por pacote
       // reaproveita a já criada em vez de debitar o saldo de novo.)
       const [existente] = await tx
-        .select({ id: reservas.id, sala_id: reservas.sala_id, pacote_cliente_id: reservas.pacote_cliente_id })
+        .select({
+          id: reservas.id,
+          sala_id: reservas.sala_id,
+          pacote_cliente_id: reservas.pacote_cliente_id,
+          status_pagamento: reservas.status_pagamento,
+        })
         .from(reservas)
         .where(
           and(
@@ -220,14 +236,18 @@ export async function agendarReservaAgente(input: {
         );
       if (existente) {
         const [s] = await tx.select({ nome: salas.nome }).from(salas).where(eq(salas.id, existente.sala_id));
-        // Reflete como a reserva existente foi paga: se já é via pacote, NÃO pedir Pix de novo
-        // (retry/2ª chamada da mesma janela). saldoApos null = já debitado antes.
+        // Reflete como a reserva existente foi paga: se já é via pacote/crédito (paga), NÃO
+        // pedir Pix de novo (retry/2ª chamada da mesma janela). saldoApos null = já debitado.
         return {
           id: existente.id,
           salaNome: s?.nome ?? "sala reservada",
           reaproveitado: true,
           viaPacote: existente.pacote_cliente_id != null,
           saldoApos: null as number | null,
+          creditoAplicado: 0,
+          diferenca: 0,
+          viaCredito: false,
+          jaPago: existente.status_pagamento === "pago",
         };
       }
 
@@ -311,6 +331,20 @@ export async function agendarReservaAgente(input: {
         saldoApos = r.saldoApos;
       }
 
+      // CRÉDITO em R$ (avulsa, sem pacote): aplica o saldo automaticamente. Cobre tudo →
+      // reserva confirmada sem Pix; cobre em parte → Pix APENAS da diferença.
+      let creditoAplicado = 0;
+      let diferenca = valor != null && Number.isFinite(valor) ? round2(valor) : 0;
+      if (!pacoteClienteId && valor != null && Number.isFinite(valor) && valor > 0) {
+        const saldoCred = await saldoCreditoEmTx(tx, clienteId);
+        if (saldoCred > 0) {
+          creditoAplicado = round2(Math.min(saldoCred, valor));
+          diferenca = round2(valor - creditoAplicado);
+        }
+      }
+      const creditoCobre = creditoAplicado > 0 && diferenca <= 0;
+      const confirmada = !!pacoteClienteId || creditoCobre;
+
       const [nova] = await tx
         .insert(reservas)
         .values({
@@ -324,8 +358,8 @@ export async function agendarReservaAgente(input: {
           inicio_em: inicio,
           fim_em: fim,
           tipo: "uso_sala",
-          status_reserva: pacoteClienteId ? "confirmada" : "pendente",
-          status_pagamento: pacoteClienteId ? "pago" : "pendente",
+          status_reserva: confirmada ? "confirmada" : "pendente",
+          status_pagamento: confirmada ? "pago" : "pendente",
           origem: "higia",
           modalidade: "presencial",
           horas_debitadas: horasDebitadas != null ? String(horasDebitadas) : null,
@@ -333,7 +367,7 @@ export async function agendarReservaAgente(input: {
         .returning();
 
       if (pacoteClienteId && horasDebitadas != null && saldoApos != null) {
-        // Movimento de débito (ledger) — após inserir a reserva (precisa do reserva_id).
+        // Movimento de débito de pacote (ledger) — após inserir a reserva (precisa do reserva_id).
         await registrarDebitoEmTx(tx, {
           pacoteClienteId,
           reservaId: nova.id,
@@ -341,31 +375,57 @@ export async function agendarReservaAgente(input: {
           saldoApos,
         });
       } else {
-        // Registro de pagamento pendente (Pix manual) — é contra ele que o comprovante
-        // enviado pelo cliente será lido/validado. valor = preço combinado pela Hígia.
-        await tx.insert(pagamentos).values({
-          cliente_id: clienteId,
-          reserva_id: nova.id,
-          valor: valor != null && Number.isFinite(valor) ? String(valor) : null,
-          status: "pendente",
-          provedor: "pix_manual",
-        });
+        // Avulsa: debita o crédito em R$ aplicado (se houver) e cobra por Pix APENAS a diferença.
+        if (creditoAplicado > 0) {
+          await debitarCreditoEmTx(tx, {
+            clienteId,
+            valor: creditoAplicado,
+            reservaId: nova.id,
+            motivo: `Crédito aplicado na reserva ${data} ${hora}`,
+          });
+        }
+        if (diferenca > 0) {
+          // Pagamento pendente (Pix manual) do que falta — o comprovante é validado contra ele.
+          await tx.insert(pagamentos).values({
+            cliente_id: clienteId,
+            reserva_id: nova.id,
+            valor: String(diferenca),
+            status: "pendente",
+            provedor: "pix_manual",
+          });
+        }
+        // diferenca <= 0 com creditoAplicado > 0 → totalmente paga por crédito (sem Pix).
       }
 
-      return { id: nova.id, salaNome: escolhida.nome, reaproveitado: false, viaPacote: !!pacoteClienteId, saldoApos };
+      return {
+        id: nova.id,
+        salaNome: escolhida.nome,
+        reaproveitado: false,
+        viaPacote: !!pacoteClienteId,
+        saldoApos,
+        creditoAplicado,
+        diferenca,
+        viaCredito: creditoAplicado > 0,
+        jaPago: confirmada,
+      };
     });
 
     // Auditoria + Google só para reserva NOVA (reaproveitada já foi registrada/sincronizada).
     if (!reserva.reaproveitado) {
+      const detPagamento = reserva.viaPacote
+        ? `PAGO via pacote (saldo restante: ${reserva.saldoApos}h)`
+        : reserva.creditoAplicado && reserva.creditoAplicado > 0
+          ? reserva.jaPago
+            ? `PAGO via crédito (R$ ${reserva.creditoAplicado.toFixed(2)})`
+            : `crédito R$ ${reserva.creditoAplicado.toFixed(2)} aplicado + Pix da diferença R$ ${reserva.diferenca?.toFixed(2)}`
+          : "pendente de Pix";
       await registrarAuditoria({
         acao: "criar",
         entidade: "reservas",
         registroId: reserva.id,
-        detalhes: reserva.viaPacote
-          ? `Hígia agendou ${data} ${hora} (${duracaoMin}min) em ${reserva.salaNome} — PAGO via pacote (saldo restante: ${reserva.saldoApos}h)`
-          : `Hígia agendou (hold) ${data} ${hora} (${duracaoMin}min) em ${reserva.salaNome} — pendente de Pix`,
+        detalhes: `Hígia agendou ${data} ${hora} (${duracaoMin}min) em ${reserva.salaNome} — ${detPagamento}`,
       }).catch(() => undefined);
-      // Reserva paga por pacote já é "confirmada" → entra no Google na hora.
+      // Reserva paga (pacote/crédito) já é "confirmada" → entra no Google na hora.
       await sincronizarReserva(reserva.id).catch(() => undefined);
     }
 
@@ -378,6 +438,10 @@ export async function agendarReservaAgente(input: {
       duracaoMin,
       viaPacote: reserva.viaPacote,
       saldoApos: reserva.saldoApos ?? undefined,
+      creditoAplicado: reserva.creditoAplicado || undefined,
+      diferenca: reserva.diferenca,
+      viaCredito: reserva.viaCredito,
+      jaPago: reserva.jaPago,
     };
   } catch (e: unknown) {
     if (e instanceof SaldoError) return { erro: e.message };

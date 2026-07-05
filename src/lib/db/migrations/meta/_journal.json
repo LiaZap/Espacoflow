@@ -85,6 +85,13 @@
       "when": 1783014605004,
       "tag": "0011_r04_msgs_editaveis",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1783216708401,
+      "tag": "0012_r08_credito_reais",
+      "breakpoints": true
     }
   ]
 }

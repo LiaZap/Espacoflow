@@ -1,6 +1,7 @@
 import { consultarDisponibilidadeAgente, agendarReservaAgente } from "@/lib/reservas/agendar";
 import { calcularPrecoAvulsa, precoAvulsaDiaDetalhe } from "@/lib/reservas/preco";
 import { pacoteAtivoDoCliente } from "@/lib/reservas/pacote-saldo";
+import { saldoCreditoCliente } from "@/lib/reservas/credito";
 import {
   listarReservasFuturasCliente,
   cancelarReservaAgente,
@@ -322,19 +323,50 @@ export async function executarFerramentaAgenda(
       });
       if ("erro" in r) return JSON.stringify({ ok: false, motivo: r.erro });
 
+      const reservaInfo = { sala: r.salaNome, data: r.data, hora: r.hora, duracao_min: r.duracaoMin };
+
       if (r.viaPacote) {
         return JSON.stringify({
           ok: true,
-          reserva: { sala: r.salaNome, data: r.data, hora: r.hora, duracao_min: r.duracaoMin },
+          reserva: reservaInfo,
           pago_por: "pacote",
           saldo_restante: r.saldoApos,
           proximo_passo:
             "Reserva CONFIRMADA usando o saldo do pacote (NÃO peça Pix). Diga ao cliente que está confirmada e informe o saldo restante de horas.",
         });
       }
+      if (r.viaCredito && r.jaPago) {
+        // Crédito em R$ cobriu tudo → confirmada, sem Pix.
+        return JSON.stringify({
+          ok: true,
+          reserva: reservaInfo,
+          pago_por: "credito",
+          credito_aplicado: r.creditoAplicado,
+          proximo_passo:
+            "Reserva CONFIRMADA usando o CRÉDITO do cliente (NÃO peça Pix). Diga que aplicou o crédito e confirme data, horário e sala.",
+        });
+      }
+      if (r.viaCredito && !r.jaPago) {
+        // Crédito cobriu em PARTE → cobrar por Pix APENAS a diferença.
+        return JSON.stringify({
+          ok: true,
+          reserva: reservaInfo,
+          pago_por: "credito_parcial",
+          credito_aplicado: r.creditoAplicado,
+          falta_pagar: r.diferenca,
+          proximo_passo: `Apliquei R$ ${r.creditoAplicado} do crédito do cliente. Falta pagar R$ ${r.diferenca} por Pix: diga isso ao cliente, envie o Pix (marcador [PIX]) e peça o comprovante SÓ dessa diferença. Não peça o valor cheio.`,
+        });
+      }
+      if (r.jaPago) {
+        return JSON.stringify({
+          ok: true,
+          reserva: reservaInfo,
+          proximo_passo: "Essa reserva já está confirmada/paga — NÃO peça Pix. Só confirme data, horário e sala ao cliente.",
+        });
+      }
       return JSON.stringify({
         ok: true,
-        reserva: { sala: r.salaNome, data: r.data, hora: r.hora, duracao_min: r.duracaoMin },
+        reserva: reservaInfo,
         proximo_passo:
           "Horário SEGURADO. Confirme ao cliente a DATA, o HORÁRIO e A SALA (use reserva.sala — sempre diga em qual sala ficou). Diga que você já segurou o horário dele (NÃO use a palavra 'provisória'). Depois de agendar TODAS as sessões pedidas, envie o Pix (marcador [PIX]) e peça o comprovante aqui. Quando o comprovante chegar, o sistema confirma tudo automaticamente — não diga que a equipe confirma nem que já está pago.",
       });
@@ -342,16 +374,24 @@ export async function executarFerramentaAgenda(
 
     if (nome === "consultar_saldo") {
       const pac = await pacoteAtivoDoCliente(ctx.clienteId);
-      if (!pac) {
-        return JSON.stringify({ ok: true, tem_saldo: false, mensagem: "Cliente sem pacote ativo — a reserva é avulsa (Pix)." });
+      const credito = await saldoCreditoCliente(ctx.clienteId);
+      if (!pac && credito <= 0) {
+        return JSON.stringify({
+          ok: true,
+          tem_saldo: false,
+          credito_reais: 0,
+          mensagem: "Cliente sem pacote ativo e sem crédito — a reserva é avulsa (Pix).",
+        });
       }
       return JSON.stringify({
         ok: true,
-        tem_saldo: true,
-        pacote: pac.pacoteNome,
-        horas_saldo: pac.horasSaldo,
-        valido_ate: pac.validoAte,
-        proximo_passo: "Ofereça usar o saldo do pacote; se o cliente topar, agende com usar_saldo=true (sem Pix).",
+        tem_saldo: !!pac,
+        ...(pac ? { pacote: pac.pacoteNome, horas_saldo: pac.horasSaldo, valido_ate: pac.validoAte } : {}),
+        credito_reais: credito,
+        proximo_passo:
+          credito > 0
+            ? `O cliente tem R$ ${credito} de crédito — é aplicado AUTOMATICAMENTE ao agendar (cobre a reserva; se faltar, o resto vai por Pix). Não precisa pedir Pix se o crédito cobrir.${pac ? " Há também pacote de horas: ofereça usar o saldo com usar_saldo=true." : ""}`
+            : "Ofereça usar o saldo do pacote; se o cliente topar, agende com usar_saldo=true (sem Pix).",
       });
     }
 
