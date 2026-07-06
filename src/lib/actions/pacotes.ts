@@ -91,8 +91,9 @@ export async function salvarPacote(_prev: FormState, formData: FormData): Promis
 }
 
 /**
- * Vende um pacote a um cliente: cria o saldo, lança o movimento de compra e
- * gera um pagamento PIX pendente (validação humana posterior).
+ * Vende um pacote a um cliente: cria o saldo JÁ ATIVO (a venda pelo painel conta como
+ * confirmada — a equipe é quem registra), lança o movimento de compra e grava o pagamento
+ * como confirmado. O saldo fica utilizável na hora (a Hígia enxerga pacote "ativo").
  */
 export async function venderPacote(_prev: FormState, formData: FormData): Promise<FormState> {
   const sessao = await exigirPermissao("pacotes", "criar");
@@ -130,8 +131,8 @@ export async function venderPacote(_prev: FormState, formData: FormData): Promis
           horas_consumidas: "0",
           horas_saldo: horas,
           valido_ate: validoAte,
-          // Saldo só fica utilizável após a confirmação do PIX (validarPagamento).
-          status: "pendente_pagamento",
+          // Venda pelo painel = confirmada: saldo já nasce ATIVO e utilizável na hora.
+          status: "ativo",
           modified_by: sessao.userId,
         })
         .returning();
@@ -145,12 +146,16 @@ export async function venderPacote(_prev: FormState, formData: FormData): Promis
         modified_by: sessao.userId,
       });
 
+      // Pagamento registrado como CONFIRMADO (a equipe vendeu/recebeu pelo painel).
       await tx.insert(pagamentos).values({
         cliente_id,
         cliente_pacote_id: cp.id,
         valor: String(pacote.preco),
-        status: "pendente",
+        status: "confirmado",
         provedor: "pix_manual",
+        pago_em: new Date(),
+        validado_em: new Date(),
+        validado_por: sessao.userId,
         modified_by: sessao.userId,
       });
     });
@@ -162,11 +167,11 @@ export async function venderPacote(_prev: FormState, formData: FormData): Promis
     userId: sessao.userId,
     acao: "criar",
     entidade: "clientes_pacotes",
-    detalhes: `Vendeu pacote ${pacote.nome} ao cliente ${cliente_id} (PIX pendente)`,
+    detalhes: `Vendeu pacote ${pacote.nome} ao cliente ${cliente_id} — saldo ATIVO`,
   });
 
   revalidatePath("/pacotes");
-  redirect("/pagamentos");
+  redirect("/pacotes");
 }
 
 /** Movimentos (extrato) de um saldo. */
