@@ -10,6 +10,7 @@ import { lerComprovante, type LeituraComprovante } from "@/lib/documentos/ler-co
 import { sincronizarReserva } from "@/lib/google/calendar";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { hojeSaoPaulo } from "@/lib/reservas/disponibilidade";
+import { ativarPacotePendentePorComprovante } from "@/lib/reservas/pacote-saldo";
 import { formatarDataCurta, formatarHoraCurta } from "@/lib/utils";
 import { getProvider } from "./provider";
 import { enviarHumanizado } from "./humanizar";
@@ -182,6 +183,18 @@ export async function processarComprovanteHigia(params: {
     )
     .orderBy(desc(pagamentos.created_at));
   if (pendentes.length === 0) {
+    // SEM reserva pendente → este comprovante pode ser de uma COMPRA DE PACOTE. Só tratamos
+    // pacote AQUI (não antes) para nunca ativar um pacote não pago com o print de uma reserva:
+    // se houver reserva pendente, ela tem prioridade e é validada no fluxo abaixo.
+    const pacote = await ativarPacotePendentePorComprovante(params.clienteId).catch(() => ({ ativado: false as const }));
+    if (pacote.ativado) {
+      const enviada = await responder(
+        params.conversaId,
+        params.telefone,
+        `Pagamento do pacote confirmado! ✅ Seu *${pacote.pacoteNome}* está ativo com *${pacote.horas}h* de saldo. Quando quiser reservar usando o saldo, é só me chamar 🙌`
+      );
+      return { tratou: true, enviada, confirmada: true };
+    }
     // Sem pagamento pendente. Se o cliente acabou de pagar e REENVIOU o print (caso
     // comum), responde idempotente em vez de deixar o LLM/guardrail pedir o comprovante
     // de novo a quem já foi confirmado.

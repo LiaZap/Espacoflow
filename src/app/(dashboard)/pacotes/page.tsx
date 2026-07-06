@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { formatarBRL } from "@/lib/utils";
 import { VenderPacoteForm } from "./_components/vender-pacote-form";
+import { ConcederCreditoForm } from "./_components/conceder-credito-form";
 
 export default async function PacotesPage() {
   const [pacotes, clientes, saldos] = await Promise.all([
@@ -27,6 +28,18 @@ export default async function PacotesPage() {
         </CardHeader>
         <CardContent>
           <VenderPacoteForm clientes={clientesOpc} pacotes={pacotesAtivos} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Conceder crédito (R$)</CardTitle>
+          <CardDescription>
+            Crédito de cortesia/ajuste em reais. A Hígia reconhece e aplica automaticamente na próxima reserva do cliente.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ConcederCreditoForm clientes={clientesOpc} />
         </CardContent>
       </Card>
 

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   clientesPacotes,
@@ -6,6 +6,7 @@ import {
   pacotes,
   politicaCancelamento,
 } from "@/lib/db/schema/pacotes";
+import { pagamentos } from "@/lib/db/schema/pagamentos";
 import { reservas } from "@/lib/db/schema/reservas";
 import { hojeSaoPaulo } from "./disponibilidade";
 
@@ -84,6 +85,145 @@ export async function debitarPacoteEmTx(
     })
     .where(eq(clientesPacotes.id, cp.id));
   return { saldoApos, horasConsumidas: params.horas };
+}
+
+const DIA_MS = 86_400_000;
+function dataMaisDias(dias: number): string {
+  return new Date(Date.now() + dias * DIA_MS).toISOString().slice(0, 10);
+}
+
+export interface CompraPacoteOk {
+  ok: true;
+  pacoteNome: string;
+  preco: number;
+  horas: number;
+  clientePacoteId: string;
+}
+
+/**
+ * COMPRA de pacote pela Hígia: resolve o pacote do catálogo (por horas 10/20/40 ou nome),
+ * cria o saldo PENDENTE de pagamento e um pagamento Pix pendente. O saldo só fica ATIVO
+ * quando o comprovante chega (ativarPacotePendentePorComprovante). O clienteId vem do servidor.
+ */
+export async function comprarPacoteAgente(
+  clienteId: string,
+  pacoteQuery: string
+): Promise<CompraPacoteOk | { erro: string }> {
+  const num = pacoteQuery.match(/\d+/)?.[0] ?? "";
+  const catalogo = await db
+    .select()
+    .from(pacotes)
+    .where(and(eq(pacotes.is_deleted, false), eq(pacotes.ativo, true), eq(pacotes.tipo, "pacote")));
+  const escolhido =
+    (num ? catalogo.find((p) => String(Math.round(Number(p.horas_incluidas))) === num) : undefined) ??
+    (pacoteQuery.trim()
+      ? catalogo.find((p) => p.nome.toLowerCase().includes(pacoteQuery.trim().toLowerCase()))
+      : undefined);
+  if (!escolhido) return { erro: "Não encontrei esse pacote. Os pacotes de saldo são 10h, 20h e 40h." };
+
+  const horas = Number(escolhido.horas_incluidas);
+  const validoAte = dataMaisDias(escolhido.validade_dias); // reajustado na ativação
+
+  try {
+    const r = await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${clienteId}))`);
+      // Idempotência: já há compra PENDENTE do mesmo pacote? Reaproveita (não duplica).
+      const [existente] = await tx
+        .select({ id: clientesPacotes.id })
+        .from(clientesPacotes)
+        .where(
+          and(
+            eq(clientesPacotes.cliente_id, clienteId),
+            eq(clientesPacotes.pacote_id, escolhido.id),
+            eq(clientesPacotes.is_deleted, false),
+            eq(clientesPacotes.status, "pendente_pagamento")
+          )
+        );
+      if (existente) return existente.id;
+
+      const [cp] = await tx
+        .insert(clientesPacotes)
+        .values({
+          cliente_id: clienteId,
+          pacote_id: escolhido.id,
+          horas_total: String(horas),
+          horas_consumidas: "0",
+          horas_saldo: String(horas),
+          valido_ate: validoAte,
+          status: "pendente_pagamento",
+        })
+        .returning();
+      await tx.insert(clientesPacotesMovimentos).values({
+        cliente_pacote_id: cp.id,
+        tipo: "compra",
+        horas: String(horas),
+        saldo_apos: String(horas),
+        motivo: `Compra do pacote ${escolhido.nome} (via Hígia)`,
+      });
+      await tx.insert(pagamentos).values({
+        cliente_id: clienteId,
+        cliente_pacote_id: cp.id,
+        valor: String(escolhido.preco),
+        status: "pendente",
+        provedor: "pix_manual",
+      });
+      return cp.id;
+    });
+    return { ok: true, pacoteNome: escolhido.nome, preco: Number(escolhido.preco), horas, clientePacoteId: r };
+  } catch {
+    return { erro: "Não consegui registrar a compra do pacote agora — tente de novo em instantes." };
+  }
+}
+
+/**
+ * Ativa um pacote PENDENTE quando o comprovante chega: confirma o pagamento do pacote e
+ * marca o saldo como ATIVO (validade a partir de agora). Idempotente. Retorna se ativou.
+ */
+export async function ativarPacotePendentePorComprovante(
+  clienteId: string
+): Promise<{ ativado: boolean; pacoteNome?: string; horas?: number }> {
+  return await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${clienteId}))`);
+    // Pagamento pendente de PACOTE (tem cliente_pacote_id; NÃO é de reserva).
+    const [pg] = await tx
+      .select()
+      .from(pagamentos)
+      .where(
+        and(
+          eq(pagamentos.cliente_id, clienteId),
+          eq(pagamentos.is_deleted, false),
+          inArray(pagamentos.status, ["pendente", "em_analise"]),
+          isNotNull(pagamentos.cliente_pacote_id)
+        )
+      )
+      .limit(1);
+    if (!pg?.cliente_pacote_id) return { ativado: false };
+
+    const [cp] = await tx
+      .select()
+      .from(clientesPacotes)
+      .where(and(eq(clientesPacotes.id, pg.cliente_pacote_id), eq(clientesPacotes.is_deleted, false)))
+      .for("update");
+    if (!cp) return { ativado: false };
+
+    const [pac] = await tx
+      .select({ nome: pacotes.nome, validade: pacotes.validade_dias })
+      .from(pacotes)
+      .where(eq(pacotes.id, cp.pacote_id));
+
+    await tx
+      .update(pagamentos)
+      .set({ status: "confirmado", pago_em: new Date(), validado_em: new Date(), updated_at: new Date() })
+      .where(eq(pagamentos.id, pg.id));
+    // Só ativa se ainda estava pendente (idempotência — não reativa/re-datar um já ativo).
+    if (cp.status === "pendente_pagamento") {
+      await tx
+        .update(clientesPacotes)
+        .set({ status: "ativo", valido_ate: dataMaisDias(pac?.validade ?? 90), updated_at: new Date() })
+        .where(eq(clientesPacotes.id, cp.id));
+    }
+    return { ativado: true, pacoteNome: pac?.nome ?? "pacote", horas: Number(cp.horas_saldo) };
+  });
 }
 
 /** Insere o movimento de débito (append-only) — chamado após inserir a reserva. */

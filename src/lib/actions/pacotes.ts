@@ -5,7 +5,13 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { hojeSaoPaulo } from "@/lib/reservas/disponibilidade";
-import { pacotes, clientesPacotes, clientesPacotesMovimentos } from "@/lib/db/schema/pacotes";
+import {
+  pacotes,
+  clientesPacotes,
+  clientesPacotesMovimentos,
+  clientesCreditos,
+  politicaCancelamento,
+} from "@/lib/db/schema/pacotes";
 import { pagamentos } from "@/lib/db/schema/pagamentos";
 import { clientes } from "@/lib/db/schema/clientes";
 import { pacoteSchema, venderPacoteSchema } from "@/lib/validators/pacotes";
@@ -43,7 +49,7 @@ export async function listarSaldosAtivos() {
     .orderBy(asc(clientes.nome));
 }
 
-export type FormState = { erro?: string };
+export type FormState = { erro?: string; ok?: boolean };
 
 export async function salvarPacote(_prev: FormState, formData: FormData): Promise<FormState> {
   const id = String(formData.get("id") ?? "");
@@ -172,6 +178,52 @@ export async function venderPacote(_prev: FormState, formData: FormData): Promis
 
   revalidatePath("/pacotes");
   redirect("/pacotes");
+}
+
+/**
+ * Concede um CRÉDITO em REAIS a um cliente (cortesia/ajuste da equipe). Vira saldo real
+ * que a Hígia reconhece e aplica automaticamente na próxima reserva. Validade = política.
+ */
+export async function concederCreditoManual(_prev: FormState, formData: FormData): Promise<FormState> {
+  const sessao = await exigirPermissao("pacotes", "criar");
+  const cliente_id = String(formData.get("cliente_id") ?? "");
+  const valor = Number(String(formData.get("valor") ?? "").replace(",", "."));
+  const motivo = String(formData.get("motivo") ?? "").trim();
+  if (!cliente_id) return { erro: "Selecione o cliente." };
+  if (!Number.isFinite(valor) || valor <= 0) return { erro: "Informe um valor de crédito válido (R$)." };
+
+  const [cli] = await db
+    .select({ id: clientes.id })
+    .from(clientes)
+    .where(and(eq(clientes.id, cliente_id), eq(clientes.is_deleted, false)));
+  if (!cli) return { erro: "Cliente não encontrado." };
+
+  const [pol] = await db
+    .select()
+    .from(politicaCancelamento)
+    .where(eq(politicaCancelamento.is_deleted, false))
+    .orderBy(desc(politicaCancelamento.versao))
+    .limit(1);
+  const validadeDias = pol?.validade_credito_dias ?? 60;
+  const expira = new Date(Date.now() + validadeDias * 86_400_000);
+  const valor2 = Math.round(valor * 100) / 100;
+
+  await db.insert(clientesCreditos).values({
+    cliente_id,
+    tipo: "ajuste",
+    valor: String(valor2),
+    expira_em: expira,
+    motivo: motivo || "Crédito concedido pela equipe (cortesia)",
+    modified_by: sessao.userId,
+  });
+  await registrarAuditoria({
+    userId: sessao.userId,
+    acao: "criar",
+    entidade: "clientes_creditos",
+    detalhes: `Concedeu R$ ${valor2.toFixed(2)} de crédito ao cliente ${cliente_id}${motivo ? ` — ${motivo}` : ""}`,
+  });
+  revalidatePath("/pacotes");
+  return { ok: true };
 }
 
 /** Movimentos (extrato) de um saldo. */

@@ -1,6 +1,6 @@
 import { consultarDisponibilidadeAgente, agendarReservaAgente } from "@/lib/reservas/agendar";
 import { calcularPrecoAvulsa, precoAvulsaDiaDetalhe } from "@/lib/reservas/preco";
-import { pacoteAtivoDoCliente } from "@/lib/reservas/pacote-saldo";
+import { pacoteAtivoDoCliente, comprarPacoteAgente } from "@/lib/reservas/pacote-saldo";
 import { saldoCreditoCliente } from "@/lib/reservas/credito";
 import {
   listarReservasFuturasCliente,
@@ -128,6 +128,18 @@ export const FERRAMENTAS_AGENDA = [
     description:
       "Consulta o saldo de pacote ativo do cliente desta conversa (horas restantes e validade). Use quando um cliente recorrente quiser reservar para saber se pode usar o saldo do pacote em vez de Pix.",
     input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "comprar_pacote",
+    description:
+      "Registra a COMPRA de um pacote de horas (10h/20h/40h) pelo cliente desta conversa. Use quando o cliente disser que quer COMPRAR/adquirir um pacote de horas. Cria o pacote como PENDENTE de pagamento; depois você envia o Pix ([PIX]) e pede o comprovante — quando ele chegar, o saldo é ATIVADO automaticamente. NÃO confunda com reservar uma sala: comprar pacote NÃO é agendar_reserva.",
+    input_schema: {
+      type: "object",
+      properties: {
+        pacote: { type: "string", description: "Qual pacote o cliente quer: '10h', '20h' ou '40h' (ou o nome do pacote)." },
+      },
+      required: ["pacote"],
+    },
   },
   {
     name: "listar_minhas_reservas",
@@ -420,6 +432,18 @@ export async function executarFerramentaAgenda(
           credito > 0
             ? `O cliente tem R$ ${credito} de crédito — é aplicado AUTOMATICAMENTE ao agendar (cobre a reserva; se faltar, o resto vai por Pix). Não precisa pedir Pix se o crédito cobrir.${pac ? " Há também pacote de horas: ofereça usar o saldo com usar_saldo=true." : ""}`
             : "Ofereça usar o saldo do pacote; se o cliente topar, agende com usar_saldo=true (sem Pix).",
+      });
+    }
+
+    if (nome === "comprar_pacote") {
+      const r = await comprarPacoteAgente(ctx.clienteId, str(input.pacote));
+      if ("erro" in r) return JSON.stringify({ ok: false, motivo: r.erro });
+      return JSON.stringify({
+        ok: true,
+        pacote: r.pacoteNome,
+        valor: r.preco,
+        horas: r.horas,
+        proximo_passo: `Compra do ${r.pacoteNome} registrada (aguardando pagamento). Diga ao cliente o valor (R$ ${r.preco}) e que são ${r.horas}h de saldo com validade de 3 meses, envie o Pix (marcador [PIX]) e peça o comprovante. Quando o comprovante chegar, o sistema ATIVA o saldo automaticamente. NÃO trate como reserva de sala nem chame agendar_reserva.`,
       });
     }
 
