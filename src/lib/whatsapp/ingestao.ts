@@ -7,7 +7,7 @@ import {
   type WhatsappConversa,
 } from "@/lib/db/schema/whatsapp";
 import { salvarPayloadBruto } from "@/lib/mongo/client";
-import { persistirMidia } from "@/lib/storage/midia";
+import { persistirMidia, persistirMidiaBase64 } from "@/lib/storage/midia";
 
 export interface MensagemNormalizada {
   telefone: string;
@@ -16,6 +16,8 @@ export interface MensagemNormalizada {
   tipo: string;
   idExterno?: string;
   midiaUrl?: string;
+  /** base64 já decodificado da mídia (Evolution com base64:true) — evita a URL .enc. */
+  midiaBase64?: string;
   payload: unknown;
   /** true = enviada PELO número conectado (humano no celular ou nosso próprio envio). */
   fromMe?: boolean;
@@ -61,7 +63,11 @@ export function normalizarEvolution(payload: PayloadQualquer): MensagemNormaliza
     midiaUrl = msg.videoMessage.url ?? msg.videoMessage.mediaUrl;
   }
 
-  return { telefone, nome, texto, tipo, midiaUrl, idExterno: key.id, payload, fromMe };
+  // Evolution com base64:true entrega a mídia já decodificada no payload (evita a URL .enc).
+  const b64 = (msg?.base64 ?? data?.base64) as unknown;
+  const midiaBase64 = typeof b64 === "string" && b64.length > 0 ? b64 : undefined;
+
+  return { telefone, nome, texto, tipo, midiaUrl, midiaBase64, idExterno: key.id, payload, fromMe };
 }
 
 export type ResultadoIngestao =
@@ -82,9 +88,14 @@ class MensagemDuplicada extends Error {}
  * incrementar não-lidas nem disparar a Hígia em duplicidade.
  */
 export async function ingerirMensagemRecebida(m: MensagemNormalizada): Promise<ResultadoIngestao> {
-  // Re-hospeda a mídia no MinIO FORA da transação (chamada de rede); senão mantém a URL original.
+  // Re-hospeda a mídia no MinIO FORA da transação (chamada de rede). Prefere o BASE64 que o
+  // Evolution manda (já decodificado) — evita a URL .enc criptografada, que não abre. Sem
+  // base64, tenta baixar a URL; se nada der (MinIO off), mantém a URL original.
   let midiaFinal = m.midiaUrl ?? null;
-  if (m.midiaUrl) {
+  if (m.midiaBase64) {
+    const persistida = await persistirMidiaBase64(m.midiaBase64, m.tipo);
+    if (persistida) midiaFinal = persistida;
+  } else if (m.midiaUrl) {
     const persistida = await persistirMidia(m.midiaUrl, m.tipo);
     if (persistida) midiaFinal = persistida;
   }

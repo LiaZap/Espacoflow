@@ -17,6 +17,7 @@ export const configAgenteSchema = z.object({
   msg_boas_vindas_novo: z.string().trim().optional(),
   msg_fora_perfil: z.string().trim().optional(),
   msg_boas_vindas: z.string().trim().optional(),
+  telefone_notificacao: z.string().trim().optional(),
   pix_chave: z.string().trim().optional(),
   pix_beneficiario: z.string().trim().optional(),
   pix_copia_cola: z.string().trim().optional(),

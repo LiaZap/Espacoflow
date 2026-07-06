@@ -1,0 +1,1 @@
+ALTER TABLE "agente_config" ADD COLUMN "telefone_notificacao" text;

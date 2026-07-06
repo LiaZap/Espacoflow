@@ -71,6 +71,14 @@ export function AgenteConfigForm({ config }: { config: AgenteConfig }) {
         </Campo>
       </div>
 
+      <Campo label="WhatsApp que recebe aviso de atendimento humano (com DDI, ex: 5561999998888)">
+        <Input
+          name="telefone_notificacao"
+          defaultValue={config.telefone_notificacao ?? ""}
+          placeholder="Deixe vazio para não notificar. A Hígia avisa esse número quando escala pra equipe."
+        />
+      </Campo>
+
       <Campo label="Prompt-base / persona (deixe vazio para usar o padrão da Hígia)">
         <Textarea name="prompt_sistema" rows={6} defaultValue={config.prompt_sistema ?? ""} />
       </Campo>

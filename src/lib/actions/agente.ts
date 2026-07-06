@@ -146,6 +146,7 @@ export async function salvarConfig(_prev: FormState, formData: FormData): Promis
     msg_boas_vindas_novo: d.msg_boas_vindas_novo || null,
     msg_fora_perfil: d.msg_fora_perfil || null,
     msg_boas_vindas: d.msg_boas_vindas || null,
+    telefone_notificacao: d.telefone_notificacao || null,
     pix_chave: d.pix_chave || null,
     pix_beneficiario: d.pix_beneficiario || null,
     pix_copia_cola: d.pix_copia_cola || null,

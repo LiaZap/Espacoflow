@@ -237,6 +237,64 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
   let blocosTexto = 0;
   let blocosMidia = 0;
 
+  // #R11.6: as FOTOS vão PRIMEIRO — só depois o texto (a pergunta), pra ela não se perder
+  // no meio das imagens. Fotos já enviadas nesta conversa não repetem (dedupe por URL).
+  const fotosJaEnviadas = new Set(
+    (
+      await db
+        .select({ url: whatsappMensagens.midia_url })
+        .from(whatsappMensagens)
+        .where(
+          and(
+            eq(whatsappMensagens.conversa_id, conversaId),
+            eq(whatsappMensagens.tipo, "image"),
+            eq(whatsappMensagens.is_deleted, false),
+            isNotNull(whatsappMensagens.midia_url)
+          )
+        )
+    ).map((r) => r.url as string)
+  );
+  for (const token of tokens) {
+    const m = await resolverMidia(token);
+    if (!m) {
+      await registrarAuditoria({
+        acao: "atualizar",
+        entidade: "whatsapp_conversas",
+        registroId: conversaId,
+        severidade: "warn",
+        detalhes: `Hígia pediu mídia inexistente: "${token}" (foto não enviada).`,
+      }).catch(() => undefined);
+      continue;
+    }
+    const tipo = tipoWhatsapp(m.tipo_arquivo);
+    const url = urlMidiaAbsoluta(m.arquivo_url);
+    const ehFoto = tipo === "image";
+    if (ehFoto && fotosJaEnviadas.has(url)) continue; // não reenvia foto já mandada
+    if (ehFoto) fotosJaEnviadas.add(url);
+    const legenda = ehFoto ? undefined : m.descricao || m.nome; // fotos vão SEM legenda
+    await provider.definirPresenca(telefone, "composing").catch(() => undefined);
+    const envio = await provider.enviarMidia(telefone, {
+      tipo,
+      url,
+      legenda,
+      nomeArquivo: m.nome_arquivo ?? undefined,
+    });
+    algumOk = algumOk || envio.ok;
+    blocosMidia += 1;
+    await db.insert(whatsappMensagens).values({
+      conversa_id: conversaId,
+      origem: "higia",
+      tipo,
+      conteudo: legenda ?? m.nome,
+      midia_url: url,
+      midia_tipo: m.tipo_arquivo,
+      status: envio.ok ? "sent" : "failed",
+      processada_por_higia: true,
+      enviada_em: new Date(),
+      id_externo: envio.idExterno ?? null,
+    });
+  }
+
   // Texto HUMANIZADO: "digitando…", mensagens picadas e delays.
   if (textoLimpo) {
     const r = await enviarHumanizado(provider, telefone, textoLimpo, {
@@ -300,73 +358,24 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     }
   }
 
-  // Fotos já enviadas NESTA conversa (dedupe cross-turno) — não reenvia a mesma imagem.
-  const fotosJaEnviadas = new Set(
-    (
-      await db
-        .select({ url: whatsappMensagens.midia_url })
-        .from(whatsappMensagens)
-        .where(
-          and(
-            eq(whatsappMensagens.conversa_id, conversaId),
-            eq(whatsappMensagens.tipo, "image"),
-            eq(whatsappMensagens.is_deleted, false),
-            isNotNull(whatsappMensagens.midia_url)
-          )
-        )
-    ).map((r) => r.url as string)
-  );
-
-  // Fotos/arquivos pedidos pela Hígia (resolvidos na biblioteca agente_midia).
-  for (const token of tokens) {
-    const m = await resolverMidia(token);
-    if (!m) {
-      // Identificador de mídia que não casa nada na biblioteca: registra para o
-      // operador diagnosticar (a Hígia "prometeu" foto que não existe).
-      await registrarAuditoria({
-        acao: "atualizar",
-        entidade: "whatsapp_conversas",
-        registroId: conversaId,
-        severidade: "warn",
-        detalhes: `Hígia pediu mídia inexistente: "${token}" (foto não enviada).`,
-      }).catch(() => undefined);
-      continue;
-    }
-    const tipo = tipoWhatsapp(m.tipo_arquivo);
-    const url = urlMidiaAbsoluta(m.arquivo_url);
-    const ehFoto = tipo === "image";
-    // #5: não reenvia foto já mandada nesta conversa (dedupe por URL).
-    if (ehFoto && fotosJaEnviadas.has(url)) continue;
-    if (ehFoto) fotosJaEnviadas.add(url);
-    // #6: fotos das salas vão SEM legenda (evita identificação errada/duplicada).
-    const legenda = ehFoto ? undefined : m.descricao || m.nome;
-    await provider.definirPresenca(telefone, "composing").catch(() => undefined);
-    const envio = await provider.enviarMidia(telefone, {
-      tipo,
-      url,
-      legenda,
-      nomeArquivo: m.nome_arquivo ?? undefined,
-    });
-    algumOk = algumOk || envio.ok;
-    blocosMidia += 1;
-    await db.insert(whatsappMensagens).values({
-      conversa_id: conversaId,
-      origem: "higia",
-      tipo,
-      conteudo: legenda ?? m.nome,
-      midia_url: url,
-      midia_tipo: m.tipo_arquivo,
-      status: envio.ok ? "sent" : "failed",
-      processada_por_higia: true,
-      enviada_em: new Date(),
-      id_externo: envio.idExterno ?? null,
-    });
-  }
-
   await db
     .update(whatsappConversas)
     .set({ ultima_mensagem_em: new Date(), ...(escalar ? { status: "humano" } : {}) })
     .where(eq(whatsappConversas.id, conversaId));
+
+  // #R11.5: avisa o número do Flow (equipe) quando a conversa vai para atendimento humano.
+  if (escalar) {
+    const notif = (cfg.telefone_notificacao ?? "").replace(/\D/g, "");
+    if (notif) {
+      const nomeCli = cli?.nome || cli?.telefone || "Cliente";
+      await provider
+        .enviarTexto(
+          notif,
+          `🔔 Atendimento humano solicitado na Hígia.\nCliente: ${nomeCli}${cli?.telefone ? ` (${cli.telefone})` : ""}\nAbra a conversa no painel para responder.`
+        )
+        .catch(() => undefined);
+    }
+  }
 
   if (escalar || violou) {
     await registrarAuditoria({
