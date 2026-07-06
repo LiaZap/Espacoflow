@@ -92,6 +92,13 @@
       "when": 1783216708401,
       "tag": "0012_r08_credito_reais",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1783342192919,
+      "tag": "0013_r09_sala04_foto",
+      "breakpoints": true
     }
   ]
 }

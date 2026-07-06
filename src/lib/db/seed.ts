@@ -116,8 +116,8 @@ async function main() {
     { nome: "Sala Privativa 01", tags: "sala-01", descricao: "Sala privativa para atendimento individual.", arquivo: "/salas/sala-01.jpg" },
     { nome: "Sala Privativa 02", tags: "sala-02", descricao: "Sala privativa para reuniões e mentorias.", arquivo: "/salas/sala-02.jpg" },
     { nome: "Sala Privativa 03", tags: "sala-03", descricao: "Sala privativa equipada para consultas.", arquivo: "/salas/sala-03.jpg" },
+    { nome: "Sala Privativa 04", tags: "sala-04", descricao: "Sala privativa equipada, com mesa.", arquivo: "/salas/ambiente.jpg" },
     { nome: "Lounge / Convivência", tags: "lounge", descricao: "Espaço de convivência e espera.", arquivo: "/salas/lounge.jpg" },
-    { nome: "Ambiente do Espaço", tags: "ambiente", descricao: "Visão geral do coworking.", arquivo: "/salas/ambiente.jpg" },
   ];
   for (const md of MIDIA_SEED) {
     const [ex] = await db.select().from(agenteMidia).where(eq(agenteMidia.nome, md.nome));
