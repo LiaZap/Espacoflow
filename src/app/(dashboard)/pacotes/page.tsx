@@ -1,4 +1,4 @@
-import { listarPacotes, listarSaldosAtivos } from "@/lib/actions/pacotes";
+import { listarPacotes, listarSaldosAtivos, listarMovimentos } from "@/lib/actions/pacotes";
 import { listarClientes } from "@/lib/actions/clientes";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatarBRL } from "@/lib/utils";
 import { VenderPacoteForm } from "./_components/vender-pacote-form";
 import { ConcederCreditoForm } from "./_components/conceder-credito-form";
+import { SaldosAtivos } from "./_components/saldos-ativos";
 
 export default async function PacotesPage() {
   const [pacotes, clientes, saldos] = await Promise.all([
@@ -13,6 +14,24 @@ export default async function PacotesPage() {
     listarClientes(),
     listarSaldosAtivos(),
   ]);
+
+  // Extrato de cada saldo ativo (histórico expansível na seção "Saldos ativos").
+  const movimentosPorSaldo = await Promise.all(saldos.map((s) => listarMovimentos(s.id)));
+  const saldosComHistorico = saldos.map((s, i) => ({
+    id: s.id,
+    cliente_nome: s.cliente_nome,
+    pacote_nome: s.pacote_nome,
+    horas_saldo: String(s.horas_saldo),
+    valido_ate: String(s.valido_ate),
+    movimentos: movimentosPorSaldo[i].map((m) => ({
+      id: m.id,
+      tipo: m.tipo,
+      horas: String(m.horas),
+      saldo_apos: String(m.saldo_apos),
+      motivo: m.motivo,
+      created_at: m.created_at instanceof Date ? m.created_at.toISOString() : String(m.created_at),
+    })),
+  }));
 
   const pacotesAtivos = pacotes.filter((p) => p.ativo).map((p) => ({ id: p.id, nome: p.nome }));
   const clientesOpc = clientes.map((c) => ({ id: c.id, nome: c.nome, telefone: c.telefone }));
@@ -78,23 +97,12 @@ export default async function PacotesPage() {
       <Card>
         <CardHeader>
           <CardTitle>Saldos ativos</CardTitle>
-          <CardDescription>Pacotes de clientes com horas disponíveis.</CardDescription>
+          <CardDescription>
+            Pacotes de clientes com horas disponíveis. Clique na seta pra ver o histórico do saldo.
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          {saldos.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum saldo ativo.</p>
-          ) : (
-            <ul className="divide-y text-sm">
-              {saldos.map((s) => (
-                <li key={s.id} className="flex items-center justify-between py-2">
-                  <span>
-                    {s.cliente_nome} — <span className="text-muted-foreground">{s.pacote_nome}</span>
-                  </span>
-                  <span className="font-medium">{s.horas_saldo}h até {s.valido_ate}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+          <SaldosAtivos saldos={saldosComHistorico} />
         </CardContent>
       </Card>
     </div>
