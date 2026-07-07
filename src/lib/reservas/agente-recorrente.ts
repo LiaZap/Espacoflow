@@ -4,7 +4,7 @@ import { reservas } from "@/lib/db/schema/reservas";
 import { salas } from "@/lib/db/schema/salas";
 import { sincronizarReserva, removerEventoReserva } from "@/lib/google/calendar";
 import { registrarAuditoria } from "@/lib/audit/logger";
-import { creditarCancelamentoEmTx } from "./pacote-saldo";
+import { creditarCancelamentoEmTx, ajustarSaldoPorDeltaEmTx, SaldoError } from "./pacote-saldo";
 import { creditarCancelamentoReaisEmTx } from "./credito";
 import { calcularJanela } from "./disponibilidade";
 import { janelaSanitizada, STATUS_LIVRES, casaSalaNome } from "./agendar";
@@ -121,14 +121,17 @@ export async function cancelarReservaAgente(
 }
 
 /**
- * Altera uma reserva DO cliente: remarca data/hora E/OU troca de sala, MANTENDO a duração
- * (sem mexer no saldo). Campos omitidos ficam como estão. Checa conflito na sala destino e
- * atualiza o Google. A Hígia resolve troca de sala sozinha (não escala).
+ * Altera uma reserva DO cliente: remarca data/hora, troca de sala E/OU muda a DURAÇÃO.
+ * Campos omitidos ficam como estão. Checa conflito na sala destino e atualiza o Google.
+ * Quando a reserva foi paga por PACOTE e a duração muda, recalcula o saldo (devolve horas se
+ * diminuiu, debita mais se aumentou — com checagem de saldo). Para reserva avulsa (Pix/crédito)
+ * a mudança de duração é recusada (o valor muda; o cliente cancela e refaz). A Hígia resolve
+ * troca de sala sozinha (não escala).
  */
 export async function alterarReservaAgente(
   clienteId: string,
   reservaId: string,
-  opts: { novaData?: string; novaHora?: string; novaSalaNome?: string }
+  opts: { novaData?: string; novaHora?: string; novaSalaNome?: string; novaDuracaoMin?: number }
 ): Promise<{ ok?: true; erro?: string; mensagem?: string }> {
   try {
     const out = await db.transaction(async (tx) => {
@@ -148,6 +151,7 @@ export async function alterarReservaAgente(
       // Campos omitidos mantêm o valor atual da reserva.
       const dataAlvo = opts.novaData?.trim() || rv.data;
       const horaAlvo = opts.novaHora?.trim() || (rv.hora ?? "").slice(0, 5);
+      const duracaoAlvo = opts.novaDuracaoMin != null ? opts.novaDuracaoMin : rv.duracao_min;
 
       // Resolve a sala destino (troca de sala) ou mantém a atual.
       let salaAlvoId = rv.sala_id;
@@ -165,13 +169,21 @@ export async function alterarReservaAgente(
 
       const mudouSala = salaAlvoId !== rv.sala_id;
       const mudouHorario = dataAlvo !== rv.data || horaAlvo !== (rv.hora ?? "").slice(0, 5);
-      if (!mudouSala && !mudouHorario) {
-        throw new ReservaAgenteError("Me diz o que você quer mudar: a data/horário ou a sala?");
+      const mudouDuracao = duracaoAlvo !== rv.duracao_min;
+      if (!mudouSala && !mudouHorario && !mudouDuracao) {
+        throw new ReservaAgenteError("Me diz o que você quer mudar: a data/horário, a sala ou a duração?");
       }
 
-      const invalido = janelaSanitizada(dataAlvo, horaAlvo, rv.duracao_min);
+      // Mudar a DURAÇÃO de uma reserva avulsa (Pix/crédito) muda o valor — recusa (cliente refaz).
+      if (mudouDuracao && !rv.pacote_cliente_id) {
+        throw new ReservaAgenteError(
+          "Pra mudar a duração dessa reserva o valor muda. O jeito mais seguro é cancelar essa e fazer uma nova reserva com a duração certa 😊"
+        );
+      }
+
+      const invalido = janelaSanitizada(dataAlvo, horaAlvo, duracaoAlvo);
       if (invalido) throw new ReservaAgenteError(invalido);
-      const { inicio, fim } = calcularJanela(dataAlvo, horaAlvo, rv.duracao_min);
+      const { inicio, fim } = calcularJanela(dataAlvo, horaAlvo, duracaoAlvo);
       if (inicio.getTime() <= Date.now()) throw new ReservaAgenteError("Esse horário já passou — escolha um futuro.");
 
       // Conflito na sala DESTINO (excluindo a própria reserva).
@@ -199,27 +211,77 @@ export async function alterarReservaAgente(
         const [s] = await tx.select({ nome: salas.nome }).from(salas).where(eq(salas.id, salaAlvoId));
         salaAlvoNome = s?.nome ?? "sua sala";
       }
+
+      // Recalcula o saldo do pacote quando a duração mudou (reserva paga por pacote).
+      let deltaHoras: number | null = null;
+      let saldoApos: number | null = null;
+      let horasNovas: number | null = null;
+      if (mudouDuracao && rv.pacote_cliente_id && rv.horas_debitadas) {
+        horasNovas = Math.round((duracaoAlvo / 60) * 100) / 100;
+        deltaHoras = Math.round((horasNovas - Number(rv.horas_debitadas)) * 100) / 100;
+        if (deltaHoras !== 0) {
+          const aj = await ajustarSaldoPorDeltaEmTx(tx, {
+            pacoteClienteId: rv.pacote_cliente_id,
+            clienteId,
+            reservaId: rv.id,
+            deltaHoras,
+          });
+          saldoApos = aj.saldoApos;
+        }
+      }
+
       await tx
         .update(reservas)
-        .set({ data: dataAlvo, hora: horaAlvo, inicio_em: inicio, fim_em: fim, sala_id: salaAlvoId, updated_at: new Date() })
+        .set({
+          data: dataAlvo,
+          hora: horaAlvo,
+          duracao_min: duracaoAlvo,
+          inicio_em: inicio,
+          fim_em: fim,
+          sala_id: salaAlvoId,
+          ...(horasNovas != null ? { horas_debitadas: String(horasNovas) } : {}),
+          updated_at: new Date(),
+        })
         .where(eq(reservas.id, rv.id));
-      return { sala: salaAlvoNome, data: dataAlvo, hora: horaAlvo, mudouSala };
+      return { sala: salaAlvoNome, data: dataAlvo, hora: horaAlvo, duracaoMin: duracaoAlvo, mudouSala, mudouDuracao, deltaHoras, saldoApos };
     });
 
+    const ajusteSaldo =
+      out.deltaHoras != null && out.deltaHoras !== 0 && out.saldoApos != null
+        ? out.deltaHoras < 0
+          ? ` (devolveu ${Math.abs(out.deltaHoras)}h ao pacote, saldo ${out.saldoApos}h)`
+          : ` (debitou +${out.deltaHoras}h do pacote, saldo ${out.saldoApos}h)`
+        : "";
     await registrarAuditoria({
       acao: "atualizar",
       entidade: "reservas",
       registroId: reservaId,
-      detalhes: `Hígia alterou reserva para ${out.data} ${out.hora} na ${out.sala}${out.mudouSala ? " (trocou de sala)" : ""}.`,
+      detalhes: `Hígia alterou reserva para ${out.data} ${out.hora} (${formatarDuracao(out.duracaoMin)}) na ${out.sala}${out.mudouSala ? " (trocou de sala)" : ""}${ajusteSaldo}.`,
     }).catch(() => undefined);
     await sincronizarReserva(reservaId).catch(() => undefined); // atualiza o evento no Google
 
-    return { ok: true, mensagem: `Pronto! Sua reserva agora é ${out.data} às ${out.hora} na ${out.sala} ✅` };
+    let mensagem = `Pronto! Sua reserva agora é ${out.data} às ${out.hora} na ${out.sala}`;
+    if (out.mudouDuracao) mensagem += ` (${formatarDuracao(out.duracaoMin)})`;
+    if (out.deltaHoras != null && out.deltaHoras !== 0 && out.saldoApos != null) {
+      mensagem +=
+        out.deltaHoras < 0
+          ? `. Devolvi ${Math.abs(out.deltaHoras)}h pro seu pacote — saldo agora: ${out.saldoApos}h`
+          : `. Debitei mais ${out.deltaHoras}h do seu pacote — saldo agora: ${out.saldoApos}h`;
+    }
+    mensagem += " ✅";
+    return { ok: true, mensagem };
   } catch (e: unknown) {
-    if (e instanceof ReservaAgenteError) return { erro: e.message };
+    if (e instanceof ReservaAgenteError || e instanceof SaldoError) return { erro: e.message };
     if (typeof e === "object" && e !== null && "code" in e && (e as { code: string }).code === "23P01") {
       return { erro: "Esse horário acabou de ser ocupado — tente outro." };
     }
     return { erro: "Não consegui alterar agora — tente de novo." };
   }
+}
+
+/** Formata minutos como "2h" ou "1h30" (para a mensagem/auditoria de alteração). */
+function formatarDuracao(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, "0")}`;
 }

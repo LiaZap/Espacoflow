@@ -73,4 +73,20 @@ describe("calcularSaldoCredito (carteira de crédito em R$)", () => {
     );
     expect(s).toBe(50);
   });
+
+  it("crédito reciclado não infla: cancela A(125) → reserva B(125 crédito + 40 Pix) → cancela B = saldo 165 (o dinheiro real do cliente), não 290", () => {
+    // Ledger real do cenário R13: o cancelamento credita Pix+crédito-usado, mas o débito de
+    // B compensa o +125 de A. O saldo final = 125(A) + 40(B) = 165 = tudo que o cliente pagou.
+    const t1 = new Date("2026-08-10T12:00:00Z"); // crédito do cancelamento de A (vence antes)
+    const t2 = new Date("2026-08-20T12:00:00Z"); // crédito do cancelamento de B
+    const s = calcularSaldoCredito(
+      [
+        { valor: "125.00", expira_em: t1 }, // cancelou A (R$125 Pix) → +125
+        { valor: "-125.00", expira_em: null }, // aplicou os 125 na reserva B
+        { valor: "165.00", expira_em: t2 }, // cancelou B (40 Pix + 125 crédito usado) → +165
+      ],
+      AGORA
+    );
+    expect(s).toBe(165);
+  });
 });

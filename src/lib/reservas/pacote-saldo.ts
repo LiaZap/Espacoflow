@@ -226,6 +226,58 @@ export async function ativarPacotePendentePorComprovante(
   });
 }
 
+/**
+ * Ajusta o saldo de um pacote por um DELTA de horas ao ALTERAR a duração de uma reserva
+ * paga por pacote. `deltaHoras > 0` debita mais (valida ativo/validade/saldo); `< 0` devolve
+ * horas ao saldo. Grava movimento append-only. O caller atualiza `horas_debitadas` da reserva.
+ * Tudo dentro da transação da alteração (mesmo lock por cliente). SaldoError volta ao cliente.
+ */
+export async function ajustarSaldoPorDeltaEmTx(
+  tx: Tx,
+  params: { pacoteClienteId: string; clienteId: string; reservaId: string; deltaHoras: number }
+): Promise<{ saldoApos: number }> {
+  const delta = Math.round(params.deltaHoras * 100) / 100;
+  const [cp] = await tx
+    .select()
+    .from(clientesPacotes)
+    .where(and(eq(clientesPacotes.id, params.pacoteClienteId), eq(clientesPacotes.is_deleted, false)))
+    .for("update");
+  if (!cp) throw new SaldoError("Não encontrei o pacote dessa reserva.");
+  if (cp.cliente_id !== params.clienteId) throw new SaldoError("Esse pacote não é deste cliente.");
+
+  const saldo = Number(cp.horas_saldo);
+  if (delta > 0) {
+    // Aumentou a duração → precisa debitar mais: valida ativo, validade e saldo.
+    if (cp.status !== "ativo") throw new SaldoError("O pacote não está ativo pra aumentar a duração.");
+    if (String(cp.valido_ate) < hojeSaoPaulo()) throw new SaldoError("O pacote venceu — não dá pra usar mais saldo.");
+    if (saldo < delta) throw new SaldoError("Saldo de horas insuficiente pra aumentar a duração dessa reserva.");
+  }
+
+  const saldoApos = Math.round((saldo - delta) * 100) / 100; // delta < 0 devolve (soma)
+  const consumidasApos = Math.max(0, Math.round((Number(cp.horas_consumidas) + delta) * 100) / 100);
+  const vencido = String(cp.valido_ate) < hojeSaoPaulo();
+  const novoStatus =
+    cp.status === "cancelado" ? "cancelado" : vencido ? "expirado" : saldoApos <= 0 ? "esgotado" : "ativo";
+  await tx
+    .update(clientesPacotes)
+    .set({
+      horas_saldo: String(saldoApos),
+      horas_consumidas: String(consumidasApos),
+      status: novoStatus,
+      updated_at: new Date(),
+    })
+    .where(eq(clientesPacotes.id, cp.id));
+  await tx.insert(clientesPacotesMovimentos).values({
+    cliente_pacote_id: cp.id,
+    reserva_id: params.reservaId,
+    tipo: delta >= 0 ? "debito" : "credito",
+    horas: String(Math.abs(delta)),
+    saldo_apos: String(saldoApos),
+    motivo: `Ajuste de duração da reserva ${params.reservaId} (via Hígia)`,
+  });
+  return { saldoApos };
+}
+
 /** Insere o movimento de débito (append-only) — chamado após inserir a reserva. */
 export async function registrarDebitoEmTx(
   tx: Tx,

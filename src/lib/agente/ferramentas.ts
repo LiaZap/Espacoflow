@@ -162,7 +162,7 @@ export const FERRAMENTAS_AGENDA = [
   {
     name: "alterar_reserva",
     description:
-      "Remarca a data/hora E/OU troca a SALA de uma reserva do cliente (mantém a duração). Use o reserva_id de listar_minhas_reservas. Verifica disponibilidade/conflito antes de mover. Para só trocar de sala mantendo o horário, informe apenas nova_sala. VOCÊ resolve isso sozinha — nunca escale troca de sala para a equipe.",
+      "Remarca a data/hora, troca a SALA E/OU muda a DURAÇÃO de uma reserva do cliente. Use o reserva_id de listar_minhas_reservas. Verifica disponibilidade/conflito antes de mover. Para só trocar de sala mantendo o horário, informe apenas nova_sala. Se o cliente pedir mais ou menos horas, use nova_duracao_min — quando a reserva foi paga por PACOTE o saldo é recalculado automaticamente (devolve/debita horas); reserva avulsa paga por Pix/crédito não muda de duração (oriente cancelar e refazer). VOCÊ resolve isso sozinha — nunca escale troca de sala/duração para a equipe.",
     input_schema: {
       type: "object",
       properties: {
@@ -172,6 +172,11 @@ export const FERRAMENTAS_AGENDA = [
         nova_sala: {
           type: "string",
           description: "Nome da sala destino (ex.: 'Sala 03') quando o cliente quer TROCAR de sala. Omita para manter a mesma sala.",
+        },
+        nova_duracao_min: {
+          type: "integer",
+          description:
+            "Nova duração em MINUTOS (mínimo 60, em múltiplos de 30; ex.: 2h = 120). Omita para manter a duração atual.",
         },
       },
       required: ["reserva_id"],
@@ -393,8 +398,8 @@ export async function executarFerramentaAgenda(
           reserva: reservaInfo,
           pago_por: "credito_parcial",
           credito_aplicado: r.creditoAplicado,
-          falta_pagar: r.diferenca,
-          proximo_passo: `Apliquei R$ ${r.creditoAplicado} do crédito do cliente. Falta pagar R$ ${r.diferenca} por Pix: diga isso ao cliente, envie o Pix (marcador [PIX]) e peça o comprovante SÓ dessa diferença. Não peça o valor cheio.`,
+          diferenca_a_pagar_pix: r.diferenca,
+          proximo_passo: `Apliquei R$ ${r.creditoAplicado} do crédito do cliente. Ainda FALTA PAGAR R$ ${r.diferenca} por Pix (isso é o valor a pagar, NÃO é crédito): diga isso ao cliente, envie o Pix (marcador [PIX]) e peça o comprovante SÓ dessa diferença. Não peça o valor cheio. Esse R$ ${r.diferenca} nunca deve ser tratado como crédito disponível depois.`,
         });
       }
       if (r.jaPago) {
@@ -467,6 +472,7 @@ export async function executarFerramentaAgenda(
         novaData: input.nova_data != null && str(input.nova_data).trim() ? str(input.nova_data).trim() : undefined,
         novaHora: input.nova_hora != null && str(input.nova_hora).trim() ? str(input.nova_hora).trim() : undefined,
         novaSalaNome: input.nova_sala != null && str(input.nova_sala).trim() ? str(input.nova_sala).trim() : undefined,
+        novaDuracaoMin: input.nova_duracao_min != null ? num(input.nova_duracao_min) : undefined,
       });
       if (r.erro) return JSON.stringify({ ok: false, motivo: r.erro });
       return JSON.stringify({ ok: true, mensagem_para_o_cliente: r.mensagem });
