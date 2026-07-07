@@ -11,6 +11,8 @@
  * Uso:
  *   npm run sim                          # roda um roteiro padrão (psicóloga, online)
  *   npm run sim -- "oi" "quero sexta 9h" "[comprovante]"   # mensagens próprias
+ *   # COMPRA DE PACOTE (testa comprar_pacote → pendente → ativa no comprovante):
+ *   npm run sim -- "oi" "sou psicólogo, atendimento de conversa" "1 pessoa" "quero comprar o pacote de 10h" "[comprovante]"
  *   SIM_TELEFONE=5511999990000 npm run sim
  *
  * Use "[comprovante]" como mensagem para simular o envio de uma imagem de comprovante.
@@ -30,6 +32,8 @@ import { clientes } from "@/lib/db/schema/clientes";
 import { reservas } from "@/lib/db/schema/reservas";
 import { pagamentos } from "@/lib/db/schema/pagamentos";
 import { salas } from "@/lib/db/schema/salas";
+import { clientesPacotes, clientesCreditos } from "@/lib/db/schema/pacotes";
+import { pacotes } from "@/lib/db/schema/pacotes";
 import { whatsappMensagens } from "@/lib/db/schema/whatsapp";
 import { ingerirMensagemRecebida } from "@/lib/whatsapp/ingestao";
 import { gerarRespostaHigia } from "@/lib/whatsapp/higia";
@@ -132,6 +136,38 @@ async function relatorioReservas(): Promise<void> {
   if (pgs.length === 0) console.log("  (nenhum)");
   for (const p of pgs) {
     console.log(`  • R$ ${p.valor ?? "—"} | status=${p.status} | comprovante=${p.comprovante_recebido ? "sim" : "não"} | leitura_confere=${p.leitura_confere ?? "—"}`);
+  }
+
+  // Pacotes de horas do cliente (compra via comprar_pacote → pendente → ativa no comprovante).
+  const pacs = await db
+    .select({
+      nome: pacotes.nome,
+      saldo: clientesPacotes.horas_saldo,
+      total: clientesPacotes.horas_total,
+      status: clientesPacotes.status,
+      valido: clientesPacotes.valido_ate,
+    })
+    .from(clientesPacotes)
+    .innerJoin(pacotes, eq(clientesPacotes.pacote_id, pacotes.id))
+    .where(and(eq(clientesPacotes.cliente_id, cli.id), eq(clientesPacotes.is_deleted, false)))
+    .orderBy(desc(clientesPacotes.created_at));
+  console.log("\n\x1b[1m=== Pacotes do cliente (saldo de horas) ===\x1b[0m");
+  if (pacs.length === 0) console.log("  (nenhum)");
+  for (const p of pacs) {
+    console.log(`  • ${p.nome} | status=${p.status} | saldo=${p.saldo}h de ${p.total}h | válido até ${p.valido}`);
+  }
+
+  // Crédito em R$ (ledger) — de cancelamento ou concedido pela equipe.
+  const creds = await db
+    .select()
+    .from(clientesCreditos)
+    .where(and(eq(clientesCreditos.cliente_id, cli.id), eq(clientesCreditos.is_deleted, false)))
+    .orderBy(desc(clientesCreditos.created_at));
+  console.log("\n\x1b[1m=== Crédito em R$ (ledger) ===\x1b[0m");
+  if (creds.length === 0) console.log("  (nenhum)");
+  for (const c of creds) {
+    const exp = c.expira_em ? new Date(c.expira_em).toISOString().slice(0, 10) : "—";
+    console.log(`  • ${c.tipo} | R$ ${c.valor} | expira ${exp} | ${c.motivo ?? ""}`);
   }
 }
 
