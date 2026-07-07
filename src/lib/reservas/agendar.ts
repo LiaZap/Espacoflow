@@ -144,6 +144,12 @@ export interface AgendamentoOk {
   viaCredito?: boolean;
   /** true se a reserva já está PAGA (pacote ou crédito cobriu tudo) — não pedir Pix. */
   jaPago?: boolean;
+  /** true se havia crédito mas a reserva é MENOR que o saldo → crédito NÃO aplicado (tudo-ou-nada). */
+  creditoNaoAplicavel?: boolean;
+  /** saldo de crédito disponível (informativo, quando creditoNaoAplicavel — para orientar o cliente). */
+  creditoDisponivel?: number;
+  /** true se reaproveitou uma reserva já existente (retry da mesma janela) — não reenviar onboarding. */
+  reaproveitado?: boolean;
 }
 
 /**
@@ -258,6 +264,8 @@ export async function agendarReservaAgente(input: {
           diferenca: 0,
           viaCredito: false,
           jaPago: existente.status_pagamento === "pago",
+          creditoNaoAplicavel: false,
+          creditoDisponivel: 0,
         };
       }
 
@@ -341,15 +349,26 @@ export async function agendarReservaAgente(input: {
         saldoApos = r.saldoApos;
       }
 
-      // CRÉDITO em R$ (avulsa, sem pacote): aplica o saldo automaticamente. Cobre tudo →
-      // reserva confirmada sem Pix; cobre em parte → Pix APENAS da diferença.
+      // CRÉDITO em R$ (avulsa, sem pacote) — regra TUDO-OU-NADA: o crédito só é aplicado
+      // quando a reserva vale IGUAL OU MAIS que o saldo (consome o saldo INTEIRO; o Pix
+      // cobre a diferença). Se a reserva for MENOR que o saldo, o crédito NÃO é aplicado
+      // (não fraciona, não gasta um crédito grande numa reserva pequena) — sinaliza para a
+      // Hígia avisar o cliente e a reserva segue por Pix do valor cheio.
       let creditoAplicado = 0;
       let diferenca = valor != null && Number.isFinite(valor) ? round2(valor) : 0;
+      let creditoNaoAplicavel = false;
+      let creditoDisponivel = 0;
       if (!pacoteClienteId && valor != null && Number.isFinite(valor) && valor > 0) {
         const saldoCred = await saldoCreditoEmTx(tx, clienteId);
         if (saldoCred > 0) {
-          creditoAplicado = round2(Math.min(saldoCred, valor));
-          diferenca = round2(valor - creditoAplicado);
+          const val = round2(valor);
+          if (val >= saldoCred) {
+            creditoAplicado = round2(saldoCred); // consome o saldo inteiro
+            diferenca = round2(val - creditoAplicado); // Pix cobre a diferença (0 se igual)
+          } else {
+            creditoNaoAplicavel = true; // reserva menor que o crédito → não aplica
+            creditoDisponivel = round2(saldoCred);
+          }
         }
       }
       const creditoCobre = creditoAplicado > 0 && diferenca <= 0;
@@ -417,6 +436,8 @@ export async function agendarReservaAgente(input: {
         diferenca,
         viaCredito: creditoAplicado > 0,
         jaPago: confirmada,
+        creditoNaoAplicavel,
+        creditoDisponivel,
       };
     });
 
@@ -452,6 +473,9 @@ export async function agendarReservaAgente(input: {
       diferenca: reserva.diferenca,
       viaCredito: reserva.viaCredito,
       jaPago: reserva.jaPago,
+      creditoNaoAplicavel: reserva.creditoNaoAplicavel,
+      creditoDisponivel: reserva.creditoDisponivel || undefined,
+      reaproveitado: reserva.reaproveitado,
     };
   } catch (e: unknown) {
     if (e instanceof SaldoError) return { erro: e.message };

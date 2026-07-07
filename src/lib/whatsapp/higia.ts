@@ -1,8 +1,9 @@
-import { and, asc, eq, isNotNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { whatsappConversas, whatsappMensagens } from "@/lib/db/schema/whatsapp";
 import { agenteConfig } from "@/lib/db/schema/agente";
 import { clientes } from "@/lib/db/schema/clientes";
+import { reservas } from "@/lib/db/schema/reservas";
 import { montarPromptHigia } from "@/lib/agente/montar-prompt";
 import { registrarIaLog, lembrarMemoria } from "@/lib/mongo/client";
 import { registrarAuditoria } from "@/lib/audit/logger";
@@ -13,6 +14,7 @@ import { extrairPix, montarMensagensPix } from "./pix";
 import { extrairTabela, montarTabelaPrecos } from "./tabela-precos";
 import { FERRAMENTAS_AGENDA, executarFerramentaAgenda } from "@/lib/agente/ferramentas";
 import { processarComprovanteHigia } from "./comprovante-higia";
+import { enviarBoasVindas } from "./boas-vindas";
 
 export interface ResultadoHigia {
   enviada: boolean;
@@ -116,6 +118,10 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
   // crédito cobriu a reserva) — nesse caso a Hígia PODE dizer "confirmada" e o guardrail
   // de pagamento (RE_CONFIRMA) não deve reescrever o texto pedindo comprovante.
   let confirmadoPorSaldo = false;
+  // Reservas recém-confirmadas por pacote/crédito (sem comprovante) NESTE turno → precisam do
+  // onboarding de acesso, que normalmente só sai no fluxo de comprovante Pix. Acumulamos TODAS
+  // do lote (o cliente pode agendar várias sessões numa mensagem) para enviar uma vez por sala.
+  const reservasConfirmadasIds: string[] = [];
   try {
     // Loop de tool use: enquanto o modelo pedir ferramenta, executamos e devolvemos
     // o resultado. Guard de 6 iterações evita loop infinito.
@@ -154,8 +160,13 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
           });
           // Reserva paga por pacote/crédito → confirmação legítima (não pedir Pix depois).
           try {
-            const p = JSON.parse(saida) as { ok?: boolean; pago_por?: string };
-            if (p?.ok && (p.pago_por === "pacote" || p.pago_por === "credito")) confirmadoPorSaldo = true;
+            const p = JSON.parse(saida) as { ok?: boolean; pago_por?: string; reserva_id?: string };
+            if (p?.ok && (p.pago_por === "pacote" || p.pago_por === "credito")) {
+              confirmadoPorSaldo = true;
+              if (p.reserva_id && !reservasConfirmadasIds.includes(p.reserva_id)) {
+                reservasConfirmadasIds.push(p.reserva_id);
+              }
+            }
           } catch {
             /* saída não-JSON — ignora */
           }
@@ -370,6 +381,23 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     }
   }
 
+  // Onboarding/acesso em reserva paga por PACOTE/CRÉDITO: o fluxo de comprovante Pix não roda
+  // aqui (não há comprovante). Enviamos a MESMA mensagem de boas-vindas, só para cliente NOVO
+  // (1ª reserva confirmada), uma vez por SALA — como no Pix. (Go-Live: antes só saía no Pix.)
+  if (reservasConfirmadasIds.length > 0 && telefone && (await ehClienteNovoParaOnboarding(conv.cliente_id, reservasConfirmadasIds))) {
+    const rows = await db
+      .select({ id: reservas.id, sala_id: reservas.sala_id })
+      .from(reservas)
+      .where(inArray(reservas.id, reservasConfirmadasIds));
+    const salasEnviadas = new Set<string>();
+    for (const rrow of rows) {
+      if (salasEnviadas.has(rrow.sala_id)) continue;
+      salasEnviadas.add(rrow.sala_id);
+      await enviarBoasVindas(rrow.id, conversaId, telefone);
+      blocosTexto += 1;
+    }
+  }
+
   await db
     .update(whatsappConversas)
     .set({ ultima_mensagem_em: new Date(), ...(escalar ? { status: "humano" } : {}) })
@@ -427,4 +455,31 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
       ? "escalado para humano (sem texto a enviar)"
       : "nada a enviar (resposta só com marcadores?)";
   return { enviada: algumOk, motivo };
+}
+
+/**
+ * Cliente NOVO para fins de onboarding: ainda não é "cliente" E não tem OUTRA reserva
+ * confirmada/concluída FORA do lote recém-criado neste turno. Mesma regra do fluxo de
+ * comprovante Pix, para a mensagem de boas-vindas/acesso sair uma única vez (1ª reserva).
+ * Recebe TODOS os ids do lote para não se auto-bloquear com uma reserva-irmã do mesmo turno.
+ */
+async function ehClienteNovoParaOnboarding(clienteId: string, reservaIdsLote: string[]): Promise<boolean> {
+  const [cli] = await db
+    .select({ status: clientes.status_lead })
+    .from(clientes)
+    .where(and(eq(clientes.id, clienteId), eq(clientes.is_deleted, false)));
+  if (cli?.status === "cliente") return false;
+  const [outra] = await db
+    .select({ id: reservas.id })
+    .from(reservas)
+    .where(
+      and(
+        eq(reservas.cliente_id, clienteId),
+        eq(reservas.is_deleted, false),
+        inArray(reservas.status_reserva, ["confirmada", "concluida"]),
+        notInArray(reservas.id, reservaIdsLote)
+      )
+    )
+    .limit(1);
+  return !outra;
 }

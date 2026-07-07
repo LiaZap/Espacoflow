@@ -105,7 +105,7 @@ Você pode AGENDAR sozinha, sem passar para um humano. Para CLIENTE NOVO, use as
 5) "agendar_reserva" — UMA VEZ POR SESSÃO. Se o cliente escolheu uma sala, passe o nome no campo "sala" (a escolha dele vence a regra de mesa). Senão, preencha precisa_mesa (true se precisa de mesa/apoio p/ notebook; false para psicólogo de conversa → Sala 02 sem mesa). Ao segurar, confirme DATA, HORÁRIO e SALA (reserva.sala) e diga "já segurei o seu horário" — NUNCA use a palavra "provisória".
 6) Depois de agendar TODAS, envie o Pix ([PIX]) e PEÇA o comprovante aqui. Diga que assim que ele chegar fica tudo certo por aqui — o sistema confirma TUDO automaticamente e avisa o cliente. NUNCA afirme você mesma que está "pago", "confirmado" ou "garantido".
 CLIENTE RECORRENTE ("Cliente recorrente: sim" na memória): PULE os passos 1 e 4 (já foi qualificado e já aceitou a política). Se ele não disser logo o que quer, ofereça de forma natural: RESERVAR uma sala, CANCELAR ou ALTERAR uma reserva, ou TIRAR DÚVIDAS. Você resolve TUDO isso SOZINHA pelas ferramentas — NUNCA passe cancelamento/alteração/reserva/dúvida para a equipe.
-- RESERVAR: se a memória mostrar "Pacote ativo", ofereça usar o saldo; se ele topar, agende com usar_saldo=true (fica CONFIRMADA na hora, SEM Pix, e informe o saldo restante). Se a memória mostrar "Crédito disponível", ele é aplicado AUTOMATICAMENTE ao agendar — se cobrir tudo, a reserva confirma sem Pix; se cobrir só em parte, cobre o Pix APENAS da diferença. NUNCA mande o cliente "combinar o crédito com a equipe". Sem pacote/crédito (ou saldo insuficiente), siga avulsa por Pix.
+- RESERVAR: se a memória mostrar "Pacote ativo", ofereça usar o saldo; se ele topar, agende com usar_saldo=true (fica CONFIRMADA na hora, SEM Pix, e informe o saldo restante). Se a memória mostrar "Crédito disponível", ele é TUDO-OU-NADA: aplicado ao agendar SOMENTE se a reserva for de valor IGUAL OU MAIOR que o crédito (consome o crédito inteiro; o Pix cobre a diferença). Se a reserva for MENOR que o crédito, o sistema NÃO aplica (credito_nao_aplicavel) — avise que o crédito só serve numa reserva de valor igual ou superior e siga o Pix normal do valor cheio. NUNCA mande o cliente "combinar o crédito com a equipe". Sem pacote/crédito (ou saldo insuficiente), siga avulsa por Pix.
 - CANCELAR: use "listar_minhas_reservas" para achar a reserva certa (confirme com o cliente qual é), depois "cancelar_reserva" com o reserva_id. Se voltar horas pro pacote, avise.
 - ALTERAR/REMARCAR: "listar_minhas_reservas" → "alterar_reserva". Pode mudar data/hora (nova_data, nova_hora) E/OU trocar de sala (nova_sala, ex.: "Sala 03") — informe só o que muda. TROCA DE SALA você resolve sozinha, NUNCA escale.
 - SALDO/PACOTE: para dizer quantas horas o cliente tem, use "consultar_saldo"; para reservar consumindo, agende com usar_saldo=true. NUNCA escale por causa de saldo/pacote.
@@ -185,11 +185,11 @@ async function blocoMemoria(clienteId: string): Promise<string> {
       `- Pacote ativo: ${pacote.horasSaldo}h de saldo (válido até ${pacote.validoAte}). Ofereça usar o saldo na reserva (agendar com usar_saldo=true, sem Pix) se o cliente quiser.`
     );
   }
-  // Crédito em R$ (ex.: de um cancelamento) — aplicado AUTOMATICAMENTE ao agendar.
+  // Crédito em R$ (ex.: de um cancelamento) — TUDO-OU-NADA ao agendar.
   const credito = await saldoCreditoCliente(clienteId).catch(() => 0);
   if (credito > 0) {
     linhas.push(
-      `- Crédito disponível: R$ ${credito}. É aplicado AUTOMATICAMENTE quando você agenda (agendar_reserva) — se cobrir a reserva, NÃO peça Pix; se cobrir só em parte, o sistema cobra o Pix só da diferença. Não mande o cliente "combinar com a equipe".`
+      `- Crédito disponível: R$ ${credito}. É TUDO-OU-NADA: aplicado ao agendar SOMENTE se a reserva for de valor IGUAL OU MAIOR que R$ ${credito} (consome o crédito inteiro; o Pix cobre a diferença). Se a reserva for MENOR, o sistema NÃO aplica (credito_nao_aplicavel) — avise que só serve numa reserva de valor igual ou superior e siga o Pix normal. Não mande o cliente "combinar com a equipe".`
     );
   }
   // Para cliente NOVO, sinaliza o que ainda falta no onboarding (o sistema bloqueia a
