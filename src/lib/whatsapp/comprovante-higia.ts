@@ -302,9 +302,14 @@ export async function processarComprovanteHigia(params: {
   // não somem em silêncio — vão para em_análise + auditoria (a equipe verifica).
   const idsMortos = ids.filter((id) => !idsOk.includes(id));
 
-  // Cliente é NOVO se NÃO tem outra reserva confirmada/concluída fora deste lote.
-  // (Calculado ANTES da transação que confirma o lote.) Só cliente novo recebe o
-  // onboarding/boas-vindas; recorrente não recebe a mensagem de acesso a cada reserva.
+  // Cliente é NOVO se ainda não é "cliente" E não tem outra reserva confirmada/concluída
+  // fora deste lote. (Calculado ANTES da transação que confirma o lote.) Só cliente novo
+  // recebe o onboarding/boas-vindas. Checar status_lead="cliente" cobre o caso de quem já
+  // confirmou uma reserva antes e depois CANCELOU (continua sendo cliente — não é "novo").
+  const [cliRow] = await db
+    .select({ status: clientes.status_lead })
+    .from(clientes)
+    .where(and(eq(clientes.id, params.clienteId), eq(clientes.is_deleted, false)));
   const [outraConfirmada] =
     reservaIdsOk.length > 0
       ? await db
@@ -320,7 +325,7 @@ export async function processarComprovanteHigia(params: {
           )
           .limit(1)
       : [];
-  const clienteNovo = !outraConfirmada;
+  const clienteNovo = cliRow?.status !== "cliente" && !outraConfirmada;
 
   if (reservaIdsOk.length === 0) {
     // Comprovante sem reserva ativa correspondente (cancelada/expirada) — não confirma às

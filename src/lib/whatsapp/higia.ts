@@ -112,6 +112,10 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
   type Bloco = { type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> };
   const msgs: Array<{ role: "user" | "assistant"; content: unknown }> = [...mensagensApi];
   let texto = "";
+  // true quando uma ferramenta confirmou pagamento de forma LEGÍTIMA (saldo de pacote ou
+  // crédito cobriu a reserva) — nesse caso a Hígia PODE dizer "confirmada" e o guardrail
+  // de pagamento (RE_CONFIRMA) não deve reescrever o texto pedindo comprovante.
+  let confirmadoPorSaldo = false;
   try {
     // Loop de tool use: enquanto o modelo pedir ferramenta, executamos e devolvemos
     // o resultado. Guard de 6 iterações evita loop infinito.
@@ -148,6 +152,13 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
           const saida = await executarFerramentaAgenda(c.name ?? "", c.input ?? {}, {
             clienteId: conv.cliente_id,
           });
+          // Reserva paga por pacote/crédito → confirmação legítima (não pedir Pix depois).
+          try {
+            const p = JSON.parse(saida) as { ok?: boolean; pago_por?: string };
+            if (p?.ok && (p.pago_por === "pacote" || p.pago_por === "credito")) confirmadoPorSaldo = true;
+          } catch {
+            /* saída não-JSON — ignora */
+          }
           resultados.push({ type: "tool_result", tool_use_id: c.id, content: saida });
         }
         msgs.push({ role: "user", content: resultados });
@@ -213,11 +224,12 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     ].join("|"),
     "iu"
   );
-  if (RE_CONFIRMA.test(texto)) {
+  if (RE_CONFIRMA.test(texto) && !confirmadoPorSaldo) {
     // Quem confirma pagamento é o CÓDIGO (processarComprovanteHigia), ao receber a
     // IMAGEM do comprovante — nunca o texto do LLM. Se o LLM tentou afirmar
     // confirmação (ex.: cliente mandou a palavra "comprovante" sem anexar o print),
     // troca por um pedido do comprovante real. NÃO escala (sem handoff para equipe).
+    // EXCEÇÃO: reserva paga por saldo de pacote/crédito É confirmada de verdade — não reescreve.
     violou = true;
     texto =
       "Pra confirmar, me envia aqui o comprovante (print ou imagem) do Pix, tá? Assim que chegar eu confirmo na hora 🙏";

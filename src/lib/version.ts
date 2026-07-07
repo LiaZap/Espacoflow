@@ -1,2 +1,2 @@
 /** Versão do build — usada no /api/health (web) e no log de inicialização do worker. */
-export const APP_VERSION = process.env.APP_VERSION || "higia-r11-ajustes-notif-fotos-midia-2026-07-06";
+export const APP_VERSION = process.env.APP_VERSION || "higia-r12-guardrail-credito-onboarding-2026-07-07";
