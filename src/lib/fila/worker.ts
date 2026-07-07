@@ -2,8 +2,9 @@ import "dotenv/config";
 import { Worker, type Job } from "bullmq";
 import { eq } from "drizzle-orm";
 import { getConexaoBull } from "./conexao";
-import { FILA_RESPONDER_HIGIA } from "./filas";
+import { FILA_RESPONDER_HIGIA, FILA_LEMBRETE_ACESSO, registrarLembreteDiario } from "./filas";
 import { gerarRespostaHigia } from "@/lib/whatsapp/higia";
+import { enviarLembretesDoDiaSeguinte } from "@/lib/whatsapp/lembrete-acesso";
 import { db } from "@/lib/db";
 import { jobsFila } from "@/lib/db/schema/jobs";
 import { APP_VERSION } from "@/lib/version";
@@ -54,8 +55,24 @@ worker.on("ready", () =>
   )
 );
 
+// Worker do LEMBRETE de acesso (~1 dia antes): o job repetível diário dispara a varredura.
+const workerLembrete = new Worker(
+  FILA_LEMBRETE_ACESSO,
+  async () => {
+    const r = await enviarLembretesDoDiaSeguinte();
+    console.log(`[worker] lembretes de acesso (amanhã): ${r.enviados}/${r.total} enviados`);
+  },
+  { connection: getConexaoBull(), concurrency: 1 }
+);
+workerLembrete.on("failed", (_job, err) => console.error(`[worker] lembrete de acesso falhou: ${err?.message}`));
+workerLembrete.on("ready", () => console.log(`[worker] fila "${FILA_LEMBRETE_ACESSO}" pronta (lembrete diário 18h SP)`));
+
+// Registra (idempotente) o job repetível diário. Roda a cada boot do worker.
+registrarLembreteDiario().catch((e) => console.error("[worker] falha ao registrar lembrete diário:", e));
+
 async function encerrar() {
   await worker.close();
+  await workerLembrete.close();
   process.exit(0);
 }
 process.on("SIGINT", encerrar);

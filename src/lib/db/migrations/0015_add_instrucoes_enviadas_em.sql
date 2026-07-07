@@ -1,0 +1,1 @@
+ALTER TABLE "reservas" ADD COLUMN "instrucoes_enviadas_em" timestamp;

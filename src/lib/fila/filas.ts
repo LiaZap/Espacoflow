@@ -2,6 +2,7 @@ import { Queue } from "bullmq";
 import { getConexaoBull } from "./conexao";
 
 export const FILA_RESPONDER_HIGIA = "responder-higia";
+export const FILA_LEMBRETE_ACESSO = "lembrete-acesso";
 
 let fila: Queue | null = null;
 
@@ -19,4 +20,35 @@ export function getFilaHigia(): Queue {
     });
   }
   return fila;
+}
+
+let filaLembrete: Queue | null = null;
+
+/** Fila do lembrete de acesso (~1 dia antes) — alimentada por um job repetível diário. */
+export function getFilaLembrete(): Queue {
+  if (!filaLembrete) {
+    filaLembrete = new Queue(FILA_LEMBRETE_ACESSO, {
+      connection: getConexaoBull(),
+      defaultJobOptions: {
+        attempts: 2,
+        backoff: { type: "exponential", delay: 60_000 },
+        removeOnComplete: 100,
+        removeOnFail: 50,
+      },
+    });
+  }
+  return filaLembrete;
+}
+
+/**
+ * Registra (idempotente) o job repetível diário do lembrete de acesso: todo dia às 18h
+ * (America/Sao_Paulo) varre as reservas CONFIRMADAS de AMANHÃ e envia as instruções.
+ * Reexecuções com o mesmo padrão são deduplicadas pelo BullMQ.
+ */
+export async function registrarLembreteDiario(): Promise<void> {
+  await getFilaLembrete().add(
+    "varrer-amanha",
+    {},
+    { repeat: { pattern: "0 18 * * *", tz: "America/Sao_Paulo" }, removeOnComplete: true }
+  );
 }
