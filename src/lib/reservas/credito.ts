@@ -156,3 +156,56 @@ export async function creditarCancelamentoReaisEmTx(
   });
   return credito;
 }
+
+/**
+ * ESTORNA o crédito em R$ aplicado a uma reserva quando um HOLD não pago EXPIRA. Sem esse
+ * estorno, o crédito parcial (que já foi debitado ao criar o hold) seria perdido para sempre
+ * numa reserva que nunca se confirmou. Insere um crédito compensatório igual ao valor debitado
+ * (validade = política). Idempotente (não estorna 2x). Retorna o valor estornado (0 se nada).
+ */
+export async function estornarCreditoReservaEmTx(tx: Tx, reservaId: string): Promise<number> {
+  const debitos = await tx
+    .select({ valor: clientesCreditos.valor, cliente_id: clientesCreditos.cliente_id })
+    .from(clientesCreditos)
+    .where(
+      and(
+        eq(clientesCreditos.reserva_id, reservaId),
+        eq(clientesCreditos.is_deleted, false),
+        eq(clientesCreditos.tipo, "debito_reserva")
+      )
+    );
+  const total = round2(debitos.reduce((a, c) => a + Math.abs(Number(c.valor)), 0));
+  if (total <= 0 || !debitos[0]) return 0;
+
+  // Idempotência: não estorna de novo se já houver estorno desta reserva.
+  const [jaEstornado] = await tx
+    .select({ id: clientesCreditos.id })
+    .from(clientesCreditos)
+    .where(
+      and(
+        eq(clientesCreditos.reserva_id, reservaId),
+        eq(clientesCreditos.is_deleted, false),
+        eq(clientesCreditos.tipo, "estorno_hold")
+      )
+    )
+    .limit(1);
+  if (jaEstornado) return 0;
+
+  const [pol] = await tx
+    .select()
+    .from(politicaCancelamento)
+    .where(eq(politicaCancelamento.is_deleted, false))
+    .orderBy(desc(politicaCancelamento.versao))
+    .limit(1);
+  const validadeDias = pol?.validade_credito_dias ?? 60;
+  const expira = new Date(Date.now() + validadeDias * 24 * 3_600_000);
+  await tx.insert(clientesCreditos).values({
+    cliente_id: debitos[0].cliente_id,
+    reserva_id: reservaId,
+    tipo: "estorno_hold",
+    valor: String(total),
+    expira_em: expira,
+    motivo: "Estorno de crédito — hold expirado sem pagamento (crédito devolvido)",
+  });
+  return total;
+}

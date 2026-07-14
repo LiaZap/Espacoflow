@@ -365,13 +365,20 @@ export async function processarComprovanteHigia(params: {
         // validado_por null = confirmado automaticamente pela Hígia (decisão do espaço).
         updated_at: new Date(),
       })
-      .where(and(inArray(pagamentos.id, idsOk), inArray(pagamentos.status, ["pendente", "em_analise"])))
+      .where(
+        and(
+          inArray(pagamentos.id, idsOk),
+          eq(pagamentos.is_deleted, false), // hold expirado solta o pagamento (soft delete) → não confirma
+          inArray(pagamentos.status, ["pendente", "em_analise"])
+        )
+      )
       .returning({ id: pagamentos.id });
-    if (flip.length === 0) return [] as { id: string }[]; // outra execução já confirmou este lote
+    if (flip.length === 0) return [] as { id: string }[]; // outra execução já confirmou / hold expirou
     await tx
       .update(reservas)
       .set({ status_pagamento: "pago", status_reserva: "confirmada", updated_at: new Date() })
-      .where(inArray(reservas.id, reservaIdsOk));
+      // Só confirma reservas AINDA vivas — não ressuscita um hold que o job de expiração cancelou.
+      .where(and(inArray(reservas.id, reservaIdsOk), inArray(reservas.status_reserva, ["pendente", "rascunho"])));
     if (idsMortos.length) {
       await tx
         .update(pagamentos)

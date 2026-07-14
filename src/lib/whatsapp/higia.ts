@@ -1,9 +1,8 @@
-import { and, asc, eq, inArray, isNotNull, notInArray } from "drizzle-orm";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { whatsappConversas, whatsappMensagens } from "@/lib/db/schema/whatsapp";
 import { agenteConfig } from "@/lib/db/schema/agente";
 import { clientes } from "@/lib/db/schema/clientes";
-import { reservas } from "@/lib/db/schema/reservas";
 import { montarPromptHigia } from "@/lib/agente/montar-prompt";
 import { registrarIaLog, lembrarMemoria } from "@/lib/mongo/client";
 import { registrarAuditoria } from "@/lib/audit/logger";
@@ -14,7 +13,7 @@ import { extrairPix, montarMensagensPix } from "./pix";
 import { extrairTabela, montarTabelaPrecos } from "./tabela-precos";
 import { FERRAMENTAS_AGENDA, executarFerramentaAgenda } from "@/lib/agente/ferramentas";
 import { processarComprovanteHigia } from "./comprovante-higia";
-import { enviarBoasVindas } from "./boas-vindas";
+import { enviarOnboardingPacoteCredito } from "./boas-vindas";
 
 export interface ResultadoHigia {
   enviada: boolean;
@@ -48,11 +47,17 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
   if (!apiKey) return { enviada: false, motivo: "sem ANTHROPIC_API_KEY (deixado para humano)" };
 
   const [cli] = await db.select().from(clientes).where(eq(clientes.id, conv.cliente_id));
-  const historico = await db
-    .select()
-    .from(whatsappMensagens)
-    .where(and(eq(whatsappMensagens.conversa_id, conversaId), eq(whatsappMensagens.is_deleted, false)))
-    .orderBy(asc(whatsappMensagens.created_at));
+  // Só as ~30 mensagens mais recentes (custo/tokens): pega as últimas por created_at DESC e
+  // reverte para a ordem ASC que o resto do código espera. A memória do cliente (perfil,
+  // pacote, crédito) vem à parte no system, então não se perde contexto ao limitar aqui.
+  const historico = (
+    await db
+      .select()
+      .from(whatsappMensagens)
+      .where(and(eq(whatsappMensagens.conversa_id, conversaId), eq(whatsappMensagens.is_deleted, false)))
+      .orderBy(desc(whatsappMensagens.created_at))
+      .limit(30)
+  ).reverse();
 
   // Coalescing anti-"double-texting": se a última mensagem da conversa já NÃO é
   // do cliente (a Hígia ou um humano já respondeu depois), não há nada novo a
@@ -111,6 +116,15 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
   const agendamento = !!cfg.reserva_via_ia;
   const system = await montarPromptHigia({ clienteId: conv.cliente_id, agendamento });
 
+  // PROMPT CACHING (reduz tokens/custo): system e ferramentas são estáveis e reenviados em
+  // TODA chamada do loop de tool-use (até ~7 por mensagem). Marcamos cache_control ephemeral
+  // no system e na ÚLTIMA ferramenta → as chamadas seguintes leem o prefixo do cache (~90% off).
+  // Não mutamos FERRAMENTAS_AGENDA (map/spread). Conferir usage.cache_read_input_tokens em prod.
+  const systemBlocks = [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];
+  const toolsComCache = FERRAMENTAS_AGENDA.map((t, i) =>
+    i === FERRAMENTAS_AGENDA.length - 1 ? { ...t, cache_control: { type: "ephemeral" as const } } : t
+  );
+
   type Bloco = { type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> };
   const msgs: Array<{ role: "user" | "assistant"; content: unknown }> = [...mensagensApi];
   let texto = "";
@@ -137,9 +151,9 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
           // Com ferramentas, a mesma resposta pode ter tool_use (JSON) + texto → mais folga.
           model: cfg.modelo_ia || "claude-haiku-4-5",
           max_tokens: agendamento ? 1500 : 800,
-          system,
+          system: systemBlocks,
           messages: msgs,
-          ...(agendamento ? { tools: FERRAMENTAS_AGENDA } : {}),
+          ...(agendamento ? { tools: toolsComCache } : {}),
         }),
       });
       // 4xx é erro de requisição (não adianta retry → não vai para a DLQ). 5xx/429 retenta.
@@ -199,7 +213,7 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
         body: JSON.stringify({
           model: cfg.modelo_ia || "claude-haiku-4-5",
           max_tokens: 800,
-          system,
+          system: systemBlocks,
           messages: msgs,
         }),
       });
@@ -381,21 +395,15 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     }
   }
 
-  // Onboarding/acesso em reserva paga por PACOTE/CRÉDITO: o fluxo de comprovante Pix não roda
-  // aqui (não há comprovante). Enviamos a MESMA mensagem de boas-vindas, só para cliente NOVO
-  // (1ª reserva confirmada), uma vez por SALA — como no Pix. (Go-Live: antes só saía no Pix.)
-  if (reservasConfirmadasIds.length > 0 && telefone && (await ehClienteNovoParaOnboarding(conv.cliente_id, reservasConfirmadasIds))) {
-    const rows = await db
-      .select({ id: reservas.id, sala_id: reservas.sala_id })
-      .from(reservas)
-      .where(inArray(reservas.id, reservasConfirmadasIds));
-    const salasEnviadas = new Set<string>();
-    for (const rrow of rows) {
-      if (salasEnviadas.has(rrow.sala_id)) continue;
-      salasEnviadas.add(rrow.sala_id);
-      await enviarBoasVindas(rrow.id, conversaId, telefone);
-      blocosTexto += 1;
-    }
+  // Onboarding/acesso em reserva paga por PACOTE/CRÉDITO (o fluxo de comprovante Pix não roda
+  // aqui). Enviado só para cliente NOVO, uma vez por sala — lógica em boas-vindas.ts.
+  if (reservasConfirmadasIds.length > 0 && telefone) {
+    blocosTexto += await enviarOnboardingPacoteCredito({
+      clienteId: conv.cliente_id,
+      conversaId,
+      telefone,
+      reservaIds: reservasConfirmadasIds,
+    });
   }
 
   await db
@@ -455,31 +463,4 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
       ? "escalado para humano (sem texto a enviar)"
       : "nada a enviar (resposta só com marcadores?)";
   return { enviada: algumOk, motivo };
-}
-
-/**
- * Cliente NOVO para fins de onboarding: ainda não é "cliente" E não tem OUTRA reserva
- * confirmada/concluída FORA do lote recém-criado neste turno. Mesma regra do fluxo de
- * comprovante Pix, para a mensagem de boas-vindas/acesso sair uma única vez (1ª reserva).
- * Recebe TODOS os ids do lote para não se auto-bloquear com uma reserva-irmã do mesmo turno.
- */
-async function ehClienteNovoParaOnboarding(clienteId: string, reservaIdsLote: string[]): Promise<boolean> {
-  const [cli] = await db
-    .select({ status: clientes.status_lead })
-    .from(clientes)
-    .where(and(eq(clientes.id, clienteId), eq(clientes.is_deleted, false)));
-  if (cli?.status === "cliente") return false;
-  const [outra] = await db
-    .select({ id: reservas.id })
-    .from(reservas)
-    .where(
-      and(
-        eq(reservas.cliente_id, clienteId),
-        eq(reservas.is_deleted, false),
-        inArray(reservas.status_reserva, ["confirmada", "concluida"]),
-        notInArray(reservas.id, reservaIdsLote)
-      )
-    )
-    .limit(1);
-  return !outra;
 }

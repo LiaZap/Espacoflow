@@ -74,6 +74,10 @@ export function janelaSanitizada(data: string, hora: string, duracaoMin: number)
     return "Duração inválida (mínimo 60 min, em múltiplos de 30).";
   }
   const horaMin = Number(hora.slice(0, 2)) * 60 + Number(hora.slice(3, 5));
+  // Grade operacional do Flow: início SEMPRE em hora cheia ou meia hora (nada de :15/:45).
+  if (horaMin % 30 !== 0) {
+    return "Horário de início inválido — só trabalhamos na grade de 30 em 30 min (ex.: 09:00 ou 09:30).";
+  }
   if (horaMin < ABRE_MIN || horaMin + duracaoMin > ABRE_MIN + JORNADA_MIN) {
     return "Fora do horário de funcionamento (07h às 23h).";
   }

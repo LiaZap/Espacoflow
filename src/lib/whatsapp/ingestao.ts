@@ -1,6 +1,7 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { clientes } from "@/lib/db/schema/clientes";
+import { variantesTelefoneBR, canonicalTelefoneBR } from "./telefone";
 import {
   whatsappConversas,
   whatsappMensagens,
@@ -103,19 +104,27 @@ export async function ingerirMensagemRecebida(m: MensagemNormalizada): Promise<R
   let conv: WhatsappConversa;
   try {
     conv = await db.transaction(async (tx) => {
-      // Serializa por telefone: evita corrida (2 entregas simultâneas) criando
-      // cliente/conversa em duplicidade ou violando o UNIQUE(telefone).
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${m.telefone}))`);
+      // Serializa pelo telefone CANÔNICO: evita corrida (2 entregas simultâneas, OU uma entrega
+      // concorrente com a importação da planilha) criando cliente duplicado / violando o
+      // UNIQUE. A mesma chave canônica é usada na importação (admin.ts) → serializam juntas.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${canonicalTelefoneBR(m.telefone)}))`);
 
-      // cliente por telefone (telefone é UNIQUE; busca inclui soft-deletado para
-      // não violar a constraint — uma mensagem nova reativa um lead excluído).
-      let [cli] = await tx.select().from(clientes).where(eq(clientes.telefone, m.telefone));
+      // Cliente por telefone, casando VARIANTES BR (com/sem 9º dígito, com/sem DDI) para
+      // reencontrar o registro certo — ex.: o importado da planilha (55+DDD+9XXXX) x o que o
+      // WhatsApp mandaria sem o 9 — e NÃO criar duplicado (P2/P3). Inclui soft-deletado.
+      // Prioridade: match EXATO > registro já "cliente" > o mais antigo.
+      const variantes = variantesTelefoneBR(m.telefone);
+      const candidatos = await tx.select().from(clientes).where(inArray(clientes.telefone, variantes));
+      let cli =
+        candidatos.find((c) => c.telefone === m.telefone) ??
+        candidatos.find((c) => c.status_lead === "cliente") ??
+        [...candidatos].sort((a, b) => a.created_at.getTime() - b.created_at.getTime())[0];
       if (!cli) {
         [cli] = await tx
           .insert(clientes)
           .values({
             nome: m.nome ?? m.telefone,
-            telefone: m.telefone,
+            telefone: canonicalTelefoneBR(m.telefone), // grava canônico (55+DDD+9) p/ novos
             origem: "whatsapp",
             status_lead: "novo",
             ultima_atividade: new Date(),

@@ -1,8 +1,9 @@
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { agenteConfig } from "@/lib/db/schema/agente";
 import { reservas } from "@/lib/db/schema/reservas";
 import { salas } from "@/lib/db/schema/salas";
+import { clientes } from "@/lib/db/schema/clientes";
 import { whatsappMensagens } from "@/lib/db/schema/whatsapp";
 import { getProvider } from "./provider";
 
@@ -51,4 +52,58 @@ export async function enviarBoasVindas(reservaId: string, conversaId: string, te
   } catch {
     // best-effort: a confirmação nunca falha por causa da mensagem de boas-vindas
   }
+}
+
+/**
+ * Cliente NOVO para fins de onboarding: ainda não é "cliente" E não tem OUTRA reserva
+ * confirmada/concluída FORA do lote recém-criado neste turno. Recebe TODOS os ids do lote
+ * para não se auto-bloquear com uma reserva-irmã do mesmo turno.
+ */
+async function ehClienteNovoParaOnboarding(clienteId: string, reservaIdsLote: string[]): Promise<boolean> {
+  const [cli] = await db
+    .select({ status: clientes.status_lead })
+    .from(clientes)
+    .where(and(eq(clientes.id, clienteId), eq(clientes.is_deleted, false)));
+  if (cli?.status === "cliente") return false;
+  const [outra] = await db
+    .select({ id: reservas.id })
+    .from(reservas)
+    .where(
+      and(
+        eq(reservas.cliente_id, clienteId),
+        eq(reservas.is_deleted, false),
+        inArray(reservas.status_reserva, ["confirmada", "concluida"]),
+        notInArray(reservas.id, reservaIdsLote)
+      )
+    )
+    .limit(1);
+  return !outra;
+}
+
+/**
+ * Onboarding para reservas confirmadas por PACOTE/CRÉDITO (o fluxo de comprovante Pix não roda
+ * nesses casos). Envia a MESMA mensagem de boas-vindas, só para cliente NOVO, uma vez por SALA.
+ * Retorna quantas mensagens saíram (para o contador de blocos). Best-effort.
+ */
+export async function enviarOnboardingPacoteCredito(params: {
+  clienteId: string;
+  conversaId: string;
+  telefone: string;
+  reservaIds: string[];
+}): Promise<number> {
+  if (params.reservaIds.length === 0 || !params.telefone) return 0;
+  if (!(await ehClienteNovoParaOnboarding(params.clienteId, params.reservaIds))) return 0;
+  const rows = await db
+    .select({ id: reservas.id, sala_id: reservas.sala_id })
+    .from(reservas)
+    .where(inArray(reservas.id, params.reservaIds));
+  const salasEnviadas = new Set<string>();
+  let enviados = 0;
+  for (const r of rows) {
+    if (salasEnviadas.has(r.sala_id)) continue;
+    salasEnviadas.add(r.sala_id);
+    await enviarBoasVindas(r.id, params.conversaId, params.telefone);
+    enviados += 1;
+  }
+  return enviados;
 }

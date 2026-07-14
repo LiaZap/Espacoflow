@@ -3,6 +3,7 @@ import { getConexaoBull } from "./conexao";
 
 export const FILA_RESPONDER_HIGIA = "responder-higia";
 export const FILA_LEMBRETE_ACESSO = "lembrete-acesso";
+export const FILA_EXPIRAR_HOLDS = "expirar-holds";
 
 let fila: Queue | null = null;
 
@@ -50,5 +51,35 @@ export async function registrarLembreteDiario(): Promise<void> {
     "varrer-amanha",
     {},
     { repeat: { pattern: "0 18 * * *", tz: "America/Sao_Paulo" }, removeOnComplete: true }
+  );
+}
+
+let filaExpirar: Queue | null = null;
+
+/** Fila que libera holds abandonados — alimentada por um job repetível a cada 15 min. */
+export function getFilaExpirar(): Queue {
+  if (!filaExpirar) {
+    filaExpirar = new Queue(FILA_EXPIRAR_HOLDS, {
+      connection: getConexaoBull(),
+      defaultJobOptions: {
+        attempts: 2,
+        backoff: { type: "exponential", delay: 30_000 },
+        removeOnComplete: 100,
+        removeOnFail: 50,
+      },
+    });
+  }
+  return filaExpirar;
+}
+
+/**
+ * Registra (idempotente) o job repetível que solta holds abandonados a cada 15 minutos.
+ * Libera salas presas por pré-reservas sem pagamento (deduplicado pelo BullMQ).
+ */
+export async function registrarExpiracaoHolds(): Promise<void> {
+  await getFilaExpirar().add(
+    "expirar",
+    {},
+    { repeat: { pattern: "*/15 * * * *", tz: "America/Sao_Paulo" }, removeOnComplete: true }
   );
 }

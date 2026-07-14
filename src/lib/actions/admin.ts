@@ -1,8 +1,9 @@
 "use server";
 
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import { variantesTelefoneBR, canonicalTelefoneBR } from "@/lib/whatsapp/telefone";
 import { clientes, clientesAnotacoes, clientesConsentimentos } from "@/lib/db/schema/clientes";
 import { clientesPacotes, clientesPacotesMovimentos } from "@/lib/db/schema/pacotes";
 import { reservas } from "@/lib/db/schema/reservas";
@@ -134,32 +135,42 @@ export async function importarCadastrosFormulario(): Promise<{
   let criados = 0;
   let atualizados = 0;
   for (const c of cadastros) {
-    // Inclui soft-deletado na busca para respeitar o UNIQUE(telefone).
-    const [existente] = await db.select().from(clientes).where(eq(clientes.telefone, c.telefone));
-    if (existente) {
-      await db
-        .update(clientes)
-        .set({
-          // Só promove a "cliente" (que o gate trata como recorrente e libera reserva) se
-          // houve aceite — antes ou agora. Sem aceite, mantém o status atual e o gate exige
-          // a política pelo chat antes de reservar (LGPD).
-          ...(existente.aceitou_politica_em || c.aceitou ? { status_lead: "cliente" as const } : {}),
-          is_deleted: false,
-          deleted_at: null,
-          ...(c.aceitou && !existente.aceitou_politica_em ? { aceitou_politica_em: new Date() } : {}),
-          ...(!existente.profissao && c.profissao ? { profissao: c.profissao } : {}),
-          ...(!existente.email && c.email ? { email: c.email } : {}),
-          ...(!existente.documento && c.documento ? { documento: c.documento } : {}),
-          ...((!existente.nome || existente.nome === existente.telefone) && c.nome ? { nome: c.nome } : {}),
-          updated_at: new Date(),
-          modified_by: sessao.userId,
-        })
-        .where(eq(clientes.id, existente.id));
-      atualizados++;
-    } else {
-      await db.insert(clientes).values({
+    // Serializa pelo telefone CANÔNICO (mesma chave da ingestão do WhatsApp) para não correr
+    // com uma mensagem do mesmo cliente durante o import e criar duplicado / violar o UNIQUE.
+    const acao = await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${canonicalTelefoneBR(c.telefone)}))`);
+      // Casa VARIANTES BR (com/sem 9º dígito, com/sem DDI) para NÃO duplicar um cliente que já
+      // exista (ex.: criado antes pelo WhatsApp). Mesma prioridade da ingestão: match EXATO >
+      // já "cliente" > mais antigo. Inclui soft-deletado para respeitar o UNIQUE(telefone).
+      const candidatos = await tx.select().from(clientes).where(inArray(clientes.telefone, variantesTelefoneBR(c.telefone)));
+      const existente =
+        candidatos.find((x) => x.telefone === c.telefone) ??
+        candidatos.find((x) => x.status_lead === "cliente") ??
+        [...candidatos].sort((a, b) => a.created_at.getTime() - b.created_at.getTime())[0];
+      if (existente) {
+        await tx
+          .update(clientes)
+          .set({
+            // Só promove a "cliente" (que o gate trata como recorrente e libera reserva) se
+            // houve aceite — antes ou agora. Sem aceite, mantém o status atual e o gate exige
+            // a política pelo chat antes de reservar (LGPD).
+            ...(existente.aceitou_politica_em || c.aceitou ? { status_lead: "cliente" as const } : {}),
+            is_deleted: false,
+            deleted_at: null,
+            ...(c.aceitou && !existente.aceitou_politica_em ? { aceitou_politica_em: new Date() } : {}),
+            ...(!existente.profissao && c.profissao ? { profissao: c.profissao } : {}),
+            ...(!existente.email && c.email ? { email: c.email } : {}),
+            ...(!existente.documento && c.documento ? { documento: c.documento } : {}),
+            ...((!existente.nome || existente.nome === existente.telefone) && c.nome ? { nome: c.nome } : {}),
+            updated_at: new Date(),
+            modified_by: sessao.userId,
+          })
+          .where(eq(clientes.id, existente.id));
+        return "atualizado" as const;
+      }
+      await tx.insert(clientes).values({
         nome: c.nome,
-        telefone: c.telefone,
+        telefone: canonicalTelefoneBR(c.telefone), // grava canônico (55+DDD+9) p/ novos
         email: c.email,
         documento: c.documento,
         profissao: c.profissao,
@@ -169,8 +180,10 @@ export async function importarCadastrosFormulario(): Promise<{
         aceitou_politica_em: c.aceitou ? new Date() : null,
         modified_by: sessao.userId,
       });
-      criados++;
-    }
+      return "criado" as const;
+    });
+    if (acao === "criado") criados++;
+    else atualizados++;
   }
 
   await registrarAuditoria({

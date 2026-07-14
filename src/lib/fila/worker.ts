@@ -2,9 +2,16 @@ import "dotenv/config";
 import { Worker, type Job } from "bullmq";
 import { eq } from "drizzle-orm";
 import { getConexaoBull } from "./conexao";
-import { FILA_RESPONDER_HIGIA, FILA_LEMBRETE_ACESSO, registrarLembreteDiario } from "./filas";
+import {
+  FILA_RESPONDER_HIGIA,
+  FILA_LEMBRETE_ACESSO,
+  FILA_EXPIRAR_HOLDS,
+  registrarLembreteDiario,
+  registrarExpiracaoHolds,
+} from "./filas";
 import { gerarRespostaHigia } from "@/lib/whatsapp/higia";
 import { enviarLembretesDoDiaSeguinte } from "@/lib/whatsapp/lembrete-acesso";
+import { expirarHoldsPendentes } from "@/lib/reservas/expirar-holds";
 import { db } from "@/lib/db";
 import { jobsFila } from "@/lib/db/schema/jobs";
 import { APP_VERSION } from "@/lib/version";
@@ -67,12 +74,26 @@ const workerLembrete = new Worker(
 workerLembrete.on("failed", (_job, err) => console.error(`[worker] lembrete de acesso falhou: ${err?.message}`));
 workerLembrete.on("ready", () => console.log(`[worker] fila "${FILA_LEMBRETE_ACESSO}" pronta (lembrete diário 18h SP)`));
 
-// Registra (idempotente) o job repetível diário. Roda a cada boot do worker.
+// Worker que LIBERA holds abandonados (pré-reservas sem pagamento): a cada 15 min.
+const workerExpirar = new Worker(
+  FILA_EXPIRAR_HOLDS,
+  async () => {
+    const r = await expirarHoldsPendentes();
+    if (r.expirados > 0) console.log(`[worker] holds expirados/liberados: ${r.expirados}`);
+  },
+  { connection: getConexaoBull(), concurrency: 1 }
+);
+workerExpirar.on("failed", (_job, err) => console.error(`[worker] expirar holds falhou: ${err?.message}`));
+workerExpirar.on("ready", () => console.log(`[worker] fila "${FILA_EXPIRAR_HOLDS}" pronta (expira holds a cada 15min)`));
+
+// Registra (idempotente) os jobs repetíveis. Roda a cada boot do worker.
 registrarLembreteDiario().catch((e) => console.error("[worker] falha ao registrar lembrete diário:", e));
+registrarExpiracaoHolds().catch((e) => console.error("[worker] falha ao registrar expiração de holds:", e));
 
 async function encerrar() {
   await worker.close();
   await workerLembrete.close();
+  await workerExpirar.close();
   process.exit(0);
 }
 process.on("SIGINT", encerrar);
