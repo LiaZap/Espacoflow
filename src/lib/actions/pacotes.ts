@@ -43,7 +43,8 @@ export async function listarSaldosAtivos() {
         eq(clientesPacotes.is_deleted, false),
         eq(clientesPacotes.status, "ativo"),
         gt(clientesPacotes.horas_saldo, "0"),
-        gte(clientesPacotes.valido_ate, hojeSaoPaulo())
+        gte(clientesPacotes.valido_ate, hojeSaoPaulo()),
+        eq(clientes.presente_planilha, true) // painel só mostra clientes presentes na planilha (item 3)
       )
     )
     .orderBy(asc(clientes.nome));

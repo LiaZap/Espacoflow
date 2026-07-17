@@ -37,6 +37,9 @@ export const clientes = pgTable(
     perfil_qualificado_em: timestamp("perfil_qualificado_em"),
     aceitou_politica_em: timestamp("aceitou_politica_em"),
     ultima_atividade: timestamp("ultima_atividade"),
+    // Exibição no painel: clientes geridos pela planilha que saíram dela ficam false (somem das
+    // listas), mas seguem no banco (histórico/relatórios). Default true (leads/novos aparecem).
+    presente_planilha: boolean("presente_planilha").notNull().default(true),
 
     created_at: timestamp("created_at").notNull().defaultNow(),
     updated_at: timestamp("updated_at").notNull().defaultNow(),

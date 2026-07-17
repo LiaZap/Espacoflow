@@ -22,7 +22,9 @@ export async function listarClientes(): Promise<ClienteComTags[]> {
   const lista = await db
     .select()
     .from(clientes)
-    .where(eq(clientes.is_deleted, false))
+    // Painel só lista quem está na planilha (item 3): geridos que saíram dela têm
+    // presente_planilha=false e somem daqui — mas continuam no banco (histórico/relatórios).
+    .where(and(eq(clientes.is_deleted, false), eq(clientes.presente_planilha, true)))
     .orderBy(desc(clientes.created_at));
 
   // Tags derivadas: COMPARECEU (reserva concluída) e COMPROU (pacote ou reserva paga).

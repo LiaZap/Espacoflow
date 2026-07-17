@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { variantesTelefoneBR, canonicalTelefoneBR } from "@/lib/whatsapp/telefone";
@@ -162,6 +162,7 @@ export async function importarCadastrosFormulario(): Promise<{
             ...(!existente.email && c.email ? { email: c.email } : {}),
             ...(!existente.documento && c.documento ? { documento: c.documento } : {}),
             ...((!existente.nome || existente.nome === existente.telefone) && c.nome ? { nome: c.nome } : {}),
+            presente_planilha: true, // está na planilha → aparece no painel
             updated_at: new Date(),
             modified_by: sessao.userId,
           })
@@ -184,6 +185,21 @@ export async function importarCadastrosFormulario(): Promise<{
     });
     if (acao === "criado") criados++;
     else atualizados++;
+  }
+
+  // Exibição (item 3): clientes GERIDOS pela planilha (importado ou já "cliente") que NÃO estão
+  // mais na planilha somem do painel (presente_planilha=false) — mas seguem no banco p/ histórico.
+  // Não toca leads do WhatsApp (status "novo"), que continuam visíveis.
+  const naPlanilha = new Set(cadastros.map((c) => canonicalTelefoneBR(c.telefone)));
+  const geridos = await db
+    .select({ id: clientes.id, telefone: clientes.telefone })
+    .from(clientes)
+    .where(and(eq(clientes.is_deleted, false), or(eq(clientes.origem, "importado"), eq(clientes.status_lead, "cliente"))));
+  let ocultados = 0;
+  for (const g of geridos) {
+    const presente = naPlanilha.has(canonicalTelefoneBR(g.telefone));
+    await db.update(clientes).set({ presente_planilha: presente, updated_at: new Date() }).where(eq(clientes.id, g.id));
+    if (!presente) ocultados += 1;
   }
 
   await registrarAuditoria({

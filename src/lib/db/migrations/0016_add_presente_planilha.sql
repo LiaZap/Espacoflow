@@ -1,0 +1,1 @@
+ALTER TABLE "clientes" ADD COLUMN "presente_planilha" boolean DEFAULT true NOT NULL;
