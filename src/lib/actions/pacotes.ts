@@ -226,6 +226,67 @@ export async function concederCreditoManual(_prev: FormState, formData: FormData
   return { ok: true };
 }
 
+/**
+ * Ajuste MANUAL de saldo de horas de um pacote (equipe). Lança +/- horas com motivo — para
+ * regularizar casos em que o consumo não foi descontado pela Hígia (ex.: reserva feita no
+ * atendimento humano). O saldo é corrigido (piso 0), horas_consumidas acompanha, e fica um
+ * movimento "ajuste" no extrato (append-only) — o histórico é preservado no banco.
+ */
+export async function ajustarSaldoManual(_prev: FormState, formData: FormData): Promise<FormState> {
+  const sessao = await exigirPermissao("pacotes", "atualizar");
+  const clientePacoteId = String(formData.get("cliente_pacote_id") ?? "");
+  const horas = Number(String(formData.get("horas") ?? "").replace(",", "."));
+  const motivo = String(formData.get("motivo") ?? "").trim();
+  if (!clientePacoteId) return { erro: "Selecione o saldo a ajustar." };
+  if (!Number.isFinite(horas) || horas === 0) return { erro: "Informe as horas do ajuste (ex.: -5 para descontar, 5 para devolver)." };
+  if (!motivo) return { erro: "Informe o motivo do ajuste (fica registrado no extrato)." };
+
+  try {
+    await db.transaction(async (tx) => {
+      const [cp] = await tx
+        .select()
+        .from(clientesPacotes)
+        .where(and(eq(clientesPacotes.id, clientePacoteId), eq(clientesPacotes.is_deleted, false)))
+        .for("update");
+      if (!cp) throw new Error("nao_encontrado");
+      const saldoAtual = Number(cp.horas_saldo);
+      const novoSaldo = Math.max(0, Math.round((saldoAtual + horas) * 100) / 100);
+      const delta = Math.round((novoSaldo - saldoAtual) * 100) / 100; // respeita o piso 0
+      const consumidas = Math.max(0, Math.round((Number(cp.horas_consumidas) - delta) * 100) / 100);
+      const vencido = String(cp.valido_ate) < hojeSaoPaulo();
+      await tx
+        .update(clientesPacotes)
+        .set({
+          horas_saldo: String(novoSaldo),
+          horas_consumidas: String(consumidas),
+          status: cp.status === "cancelado" ? "cancelado" : vencido ? "expirado" : novoSaldo <= 0 ? "esgotado" : "ativo",
+          updated_at: new Date(),
+          modified_by: sessao.userId,
+        })
+        .where(eq(clientesPacotes.id, cp.id));
+      await tx.insert(clientesPacotesMovimentos).values({
+        cliente_pacote_id: cp.id,
+        tipo: "ajuste",
+        horas: String(delta),
+        saldo_apos: String(novoSaldo),
+        motivo: `Ajuste manual: ${motivo}`,
+        modified_by: sessao.userId,
+      });
+    });
+  } catch {
+    return { erro: "Não foi possível ajustar o saldo. Tente de novo." };
+  }
+  await registrarAuditoria({
+    userId: sessao.userId,
+    acao: "atualizar",
+    entidade: "clientes_pacotes",
+    registroId: clientePacoteId,
+    detalhes: `Ajuste manual de saldo: ${horas > 0 ? "+" : ""}${horas}h — ${motivo}`,
+  });
+  revalidatePath("/pacotes");
+  return { ok: true };
+}
+
 /** Movimentos (extrato) de um saldo. */
 export async function listarMovimentos(clientePacoteId: string) {
   await exigirPermissao("pacotes", "ler");

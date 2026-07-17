@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatarBRL } from "@/lib/utils";
 import { VenderPacoteForm } from "./_components/vender-pacote-form";
 import { ConcederCreditoForm } from "./_components/conceder-credito-form";
+import { AjustarSaldoForm } from "./_components/ajustar-saldo-form";
 import { SaldosAtivos } from "./_components/saldos-ativos";
 
 export default async function PacotesPage() {
@@ -59,6 +60,19 @@ export default async function PacotesPage() {
         </CardHeader>
         <CardContent>
           <ConcederCreditoForm clientes={clientesOpc} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Ajustar saldo (horas)</CardTitle>
+          <CardDescription>
+            Corrige o saldo de horas de um pacote (ex.: consumo feito no atendimento humano que não foi descontado).
+            Lance +/- horas com o motivo — o histórico fica no extrato do saldo.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <AjustarSaldoForm saldos={saldosComHistorico} />
         </CardContent>
       </Card>
 
