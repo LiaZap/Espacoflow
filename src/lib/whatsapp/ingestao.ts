@@ -111,14 +111,18 @@ export async function ingerirMensagemRecebida(m: MensagemNormalizada): Promise<R
 
       // Cliente por telefone, casando VARIANTES BR (com/sem 9º dígito, com/sem DDI) para
       // reencontrar o registro certo — ex.: o importado da planilha (55+DDD+9XXXX) x o que o
-      // WhatsApp mandaria sem o 9 — e NÃO criar duplicado (P2/P3). Inclui soft-deletado.
-      // Prioridade: match EXATO > registro já "cliente" > o mais antigo.
+      // WhatsApp mandaria sem o 9. Prioridade: registro NÃO-deletado "cliente" > mais antigo
+      // (o MESMO vencedor do dedup). NÃO usar match exato primeiro: o duplicado "novo" foi
+      // criado do mesmo remoteJid, tem telefone idêntico ao que o WhatsApp manda e venceria o
+      // exato — mantendo o recorrente como "novo" (Item 1). Preferir não-deletado evita
+      // ressuscitar o perdedor que o dedup soft-deletou.
       const variantes = variantesTelefoneBR(m.telefone);
       const candidatos = await tx.select().from(clientes).where(inArray(clientes.telefone, variantes));
+      const ativos = candidatos.filter((c) => !c.is_deleted);
+      const pool = ativos.length ? ativos : candidatos;
       let cli =
-        candidatos.find((c) => c.telefone === m.telefone) ??
-        candidatos.find((c) => c.status_lead === "cliente") ??
-        [...candidatos].sort((a, b) => a.created_at.getTime() - b.created_at.getTime())[0];
+        pool.find((c) => c.status_lead === "cliente") ??
+        [...pool].sort((a, b) => a.created_at.getTime() - b.created_at.getTime())[0];
       if (!cli) {
         [cli] = await tx
           .insert(clientes)

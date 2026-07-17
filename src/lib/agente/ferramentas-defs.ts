@@ -88,15 +88,20 @@ export const FERRAMENTAS_AGENDA = [
           type: "string",
           description: "Para que o cliente vai usar a sala (ex.: atendimento, reunião, mentoria)",
         },
+        sala_id: {
+          type: "string",
+          description:
+            "ID da sala a reservar — cole aqui o `sala_recomendada_id` que consultar_disponibilidade devolveu, assim que o cliente aceitar a sala oferecida. Garante que a reserva sai EXATAMENTE na sala que você ofereceu. Use este campo no fluxo normal.",
+        },
         sala: {
           type: "string",
           description:
-            "Nome EXATO da sala que o cliente escolheu explicitamente (ex.: 'Sala 03' ou como veio em consultar_disponibilidade). Deixe vazio para o sistema escolher pela necessidade de mesa. Se o cliente pediu uma sala, a escolha dele TEM prioridade sobre a regra de mesa.",
+            "Alternativa ao sala_id: nome EXATO da sala quando o cliente pede uma sala específica pelo nome (ex.: 'Sala 03'). Prefira sala_id (do consultar_disponibilidade). É obrigatório informar sala_id OU sala — o sistema NÃO escolhe a sala sozinho.",
         },
         precisa_mesa: {
           type: "boolean",
           description:
-            "true se o cliente vai precisar de mesa/escrivaninha (ex.: apoio para notebook). false para terapia de conversa (psicólogo → Sala 02 sem mesa). Só é usado quando o cliente NÃO escolheu uma sala em `sala`. Pergunte ao cliente se não souber.",
+            "Informe em consultar_disponibilidade para recomendar a sala certa. Em agendar_reserva não decide mais a sala sozinho (use sala_id/sala): true = precisa de mesa/apoio p/ notebook; false = terapia de conversa (psicólogo → sala sem mesa).",
         },
         usar_saldo: {
           type: "boolean",

@@ -55,9 +55,16 @@ async function main() {
     valido_ate: dataFutura(90),
     status: "ativo",
   });
-  console.log(`\nSetup: cliente ${cli.id.slice(0, 8)} | telefone planilha=${COM_NOVE} (com 9) | saldo 20h\n`);
+  // 1b) DUPLICADO "novo" pré-fix: registro criado pelo WhatsApp com o telefone SEM o 9º dígito
+  // (formato EXATO que o WhatsApp manda). É o que quebrava o Item 1 — o match exato o escolhia
+  // em vez do "cliente". O fix deve IGNORAR este e resolver para o "cliente".
+  const [dup] = await db
+    .insert(clientes)
+    .values({ nome: "Vitória (novo)", telefone: SEM_NOVE, status_lead: "novo", origem: "whatsapp" })
+    .returning();
+  console.log(`\nSetup: cliente ${cli.id.slice(0, 8)} (COM 9, "cliente", saldo 20h) + duplicado ${dup.id.slice(0, 8)} (SEM 9, "novo")\n`);
 
-  // 2) Mensagem de WhatsApp com o MESMO número SEM o 9º dígito.
+  // 2) Mensagem de WhatsApp com o MESMO número SEM o 9º dígito (bate EXATO no duplicado "novo").
   const r = await ingerirMensagemRecebida({
     telefone: SEM_NOVE,
     nome: "Vitória",
@@ -73,13 +80,13 @@ async function main() {
   }
 
   // 3) Provas.
-  assert("resolveu para o MESMO cliente (não criou duplicado)", r.conversa.cliente_id === cli.id, `conversa.cliente_id=${r.conversa.cliente_id?.slice(0, 8)} esperado=${cli.id.slice(0, 8)}`);
+  assert("resolveu para o registro 'cliente' (NÃO o duplicado 'novo')", r.conversa.cliente_id === cli.id, `conversa.cliente_id=${r.conversa.cliente_id?.slice(0, 8)} esperado=${cli.id.slice(0, 8)} (dup=${dup.id.slice(0, 8)})`);
 
   const ativos = await db
     .select({ id: clientes.id })
     .from(clientes)
     .where(and(inArray(clientes.telefone, variantesTelefoneBR(SEM_NOVE)), eq(clientes.is_deleted, false)));
-  assert("existe só 1 cliente para as variantes (sem duplicado)", ativos.length === 1, `encontrados=${ativos.length}`);
+  assert("NÃO criou um 3º registro (segue com os 2 pré-existentes)", ativos.length === 2, `encontrados=${ativos.length}`);
 
   const saldo = await pacoteAtivoDoCliente(cli.id);
   assert("saldo do recorrente é reconhecido", !!saldo && saldo.horasSaldo === 20, `saldo=${saldo?.horasSaldo ?? "nenhum"}`);

@@ -1,8 +1,9 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { agenteConfig, agentePrecos, agenteBaseConhecimento, agenteMidia } from "@/lib/db/schema/agente";
 import { clientes } from "@/lib/db/schema/clientes";
 import { reservas } from "@/lib/db/schema/reservas";
+import { salas } from "@/lib/db/schema/salas";
 import { obterMemoria } from "@/lib/mongo/client";
 import { pacoteAtivoDoCliente } from "@/lib/reservas/pacote-saldo";
 import { saldoCreditoCliente } from "@/lib/reservas/credito";
@@ -208,6 +209,31 @@ async function blocoMemoria(clienteId: string): Promise<string> {
         : "- ⚠️ Ainda NÃO aceitou a política — envie o formulário de cadastro e valide com confirmar_cadastro (aceite só vale pela planilha) antes de agendar."
     );
   }
+  // Reservas FUTURAS já confirmadas — para a Hígia RESPONDER perguntas sobre elas (ex.: "qual
+  // sala?") sem re-cobrar Pix de uma reserva que já está paga (Item 6). Informa o estado real.
+  const confirmadas = await db
+    .select({ sala: salas.nome, data: reservas.data, hora: reservas.hora, pago: reservas.status_pagamento })
+    .from(reservas)
+    .innerJoin(salas, eq(reservas.sala_id, salas.id))
+    .where(
+      and(
+        eq(reservas.cliente_id, clienteId),
+        eq(reservas.is_deleted, false),
+        eq(reservas.status_reserva, "confirmada"),
+        gt(reservas.fim_em, new Date())
+      )
+    )
+    .orderBy(asc(reservas.inicio_em))
+    .limit(5);
+  if (confirmadas.length > 0) {
+    const itens = confirmadas
+      .map((r) => `${r.sala} em ${r.data} às ${(r.hora ?? "").slice(0, 5)}${r.pago === "pago" ? " (PAGA)" : ""}`)
+      .join("; ");
+    linhas.push(
+      `- Reservas CONFIRMADAS deste cliente: ${itens}. Se ele perguntar sobre uma dessas (ex.: "qual sala?"), RESPONDA com esses dados. Se a reserva está PAGA/confirmada, NUNCA peça Pix nem comprovante de novo — o pagamento já foi tratado.`
+    );
+  }
+
   if (mem?.resumo) linhas.push(`- Notas anteriores: ${String(mem.resumo)}`);
   if (mem?.ultima_interacao) linhas.push(`- Última interação: ${String(mem.ultima_interacao)}`);
 

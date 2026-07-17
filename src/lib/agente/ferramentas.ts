@@ -121,15 +121,18 @@ export async function executarFerramentaAgenda(
         });
       }
       // Recomenda UMA sala por vez (nunca a lista toda, nunca comparar salas entre si).
+      // Devolve o ID da sala recomendada: o LLM DEVE colá-lo em agendar_reserva.sala_id para
+      // reservar EXATAMENTE a sala oferecida (senão o agendar re-escolheria e poderia divergir).
       return JSON.stringify({
         ok: true,
         disponivel: true,
         sala_recomendada: livres[0].nome,
+        sala_recomendada_id: livres[0].id,
         tem_alternativa: livres.length > 1,
         instrucao:
           "Ofereça SOMENTE a sala_recomendada, uma por vez (ex.: 'a " +
           livres[0].nome +
-          " está disponível, quer?'). NUNCA liste várias salas nem compare salas entre si. Se o cliente recusar, chame consultar_disponibilidade de novo com excluir=['" +
+          " está disponível, quer?'). Quando o cliente aceitar, chame agendar_reserva passando sala_id = sala_recomendada_id (reserva a MESMA sala oferecida). NUNCA liste várias salas nem compare salas entre si. Se o cliente recusar, chame consultar_disponibilidade de novo com excluir=['" +
           livres[0].nome +
           "'] para pegar a próxima compatível.",
       });
@@ -139,15 +142,17 @@ export async function executarFerramentaAgenda(
       const duracaoMin = num(input.duracao_min);
       const usarSaldo = bool(input.usar_saldo);
 
-      // A sala NÃO pode ser decidida silenciosamente: exige a escolha explícita do
-      // cliente (sala) OU a resposta de "precisa de mesa?" antes de alocar.
+      // A sala reservada tem que ser EXATAMENTE a oferecida: exige sala_id (o
+      // sala_recomendada_id devolvido por consultar_disponibilidade) OU o nome da sala escolhida
+      // pelo cliente. Sem isso o agendar re-escolheria por conta própria e poderia divergir da
+      // sala oferecida (Item 5). precisa_mesa sozinho NÃO basta mais.
+      const temSalaId = input.sala_id != null && str(input.sala_id).trim().length > 0;
       const temSala = input.sala != null && str(input.sala).trim().length > 0;
-      const temMesa = input.precisa_mesa != null;
-      if (!temSala && !temMesa) {
+      if (!temSalaId && !temSala) {
         return JSON.stringify({
           ok: false,
           motivo:
-            "Antes de agendar, pergunte ao cliente se ele vai precisar de mesa/apoio para notebook (ou qual sala prefere). NÃO escolha a sala sozinha sem essa resposta.",
+            "Não escolha a sala sozinha. Chame consultar_disponibilidade primeiro e, quando o cliente aceitar a sala oferecida, agende passando sala_id = sala_recomendada_id (ou o nome exato em sala).",
         });
       }
 
@@ -189,6 +194,7 @@ export async function executarFerramentaAgenda(
         hora: str(input.hora),
         duracaoMin,
         finalidade: input.finalidade ? str(input.finalidade) : undefined,
+        salaId: input.sala_id != null && str(input.sala_id).trim() ? str(input.sala_id).trim() : undefined,
         salaNome: input.sala != null && str(input.sala).trim() ? str(input.sala).trim() : undefined,
         valor: usarSaldo ? undefined : valor,
         precisaMesa: input.precisa_mesa != null ? bool(input.precisa_mesa) : undefined,
