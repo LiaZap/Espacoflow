@@ -27,6 +27,14 @@ describe("telefone BR — variantes e canônico (identidade do cliente)", () => 
     expect(canonicalTelefoneBR("(11) 98765-4321")).toBe("5511987654321"); // com máscara
   });
 
+  it("trata o '0' de tronco (caso Samira): 061... e 5561... são a mesma pessoa", () => {
+    const a = "061993177157"; // digitado com o 0 de tronco (planilha)
+    const b = "556193177157"; // formato do WhatsApp (sem o 9º dígito)
+    expect(canonicalTelefoneBR(a)).toBe(canonicalTelefoneBR(b)); // mesmo canônico → dedup agrupa
+    const va = new Set(variantesTelefoneBR(a));
+    expect(variantesTelefoneBR(b).some((x) => va.has(x))).toBe(true); // variantes casam no lookup
+  });
+
   it("formato inesperado não quebra (devolve dígitos crus)", () => {
     expect(canonicalTelefoneBR("123")).toBe("123");
     expect(variantesTelefoneBR("")).toEqual([]);

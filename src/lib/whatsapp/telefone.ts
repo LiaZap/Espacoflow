@@ -1,6 +1,11 @@
-/** Só dígitos. */
+/**
+ * Só dígitos, SEM o "0" de tronco. Número BR nunca começa com 0 — o 0 é só prefixo de discagem
+ * (ex.: cliente digita "061 99..." no formulário). Sem tirar, "061..." viraria DDD "06" (errado)
+ * e não casaria com o mesmo número no formato 55+DDD (foi o caso da Samira).
+ */
 function digitos(s: string): string {
-  return (s ?? "").replace(/\D/g, "");
+  const d = (s ?? "").replace(/\D/g, "");
+  return d.startsWith("0") ? d.replace(/^0+/, "") : d;
 }
 
 /**
@@ -20,6 +25,7 @@ export function variantesTelefoneBR(raw: string): string[] {
     if (n.length >= 8) {
       v.add(`55${ddd}${n}`);
       v.add(`${ddd}${n}`);
+      v.add(`0${ddd}${n}`); // casa registros gravados com o "0" de tronco (ex.: "061 99...")
     }
   };
   if (ddd.length === 2 && num.length >= 8) {
