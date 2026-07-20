@@ -31,6 +31,9 @@ export const salas = pgTable(
     // Tem mesa/escrivaninha? Roteamento: psicólogo (terapia de conversa) vai p/ sala
     // SEM mesa; quem precisa de apoio p/ notebook vai p/ sala COM mesa.
     tem_mesa: boolean("tem_mesa").notNull().default(true),
+    // Tem poltrona reclinável? A Sala 02 é a ÚNICA sem. Quem pede "cadeira/poltrona
+    // reclinável" NÃO pode cair na 02 — mesmo dizendo que não precisa de mesa.
+    tem_poltrona: boolean("tem_poltrona").notNull().default(true),
     preco_hora: numeric("preco_hora", { precision: 12, scale: 2 }),
     endereco_fisico: text("endereco_fisico"),
     // Instrução de acesso da sala (sala física + senha da fechadura), enviada no

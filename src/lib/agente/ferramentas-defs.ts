@@ -65,6 +65,11 @@ export const FERRAMENTAS_AGENDA = [
           description:
             "true se o cliente precisa de mesa/apoio para notebook — o sistema NÃO oferece salas sem mesa (ex.: Sala 02). Sempre informe conforme a necessidade já dita pelo cliente.",
         },
+        precisa_poltrona: {
+          type: "boolean",
+          description:
+            "true se o cliente pediu/precisa de POLTRONA RECLINÁVEL (ex.: 'quero a cadeira reclinável', hipnose, terapia deitada). O sistema então NÃO oferece a Sala 02 — ela é a ÚNICA sem poltrona. Informe sempre que o cliente mencionar poltrona/cadeira reclinável.",
+        },
         excluir: {
           type: "array",
           items: { type: "string" },

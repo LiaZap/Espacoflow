@@ -109,6 +109,7 @@ export async function executarFerramentaAgenda(
     if (nome === "consultar_disponibilidade") {
       const r = await consultarDisponibilidadeAgente(str(input.data), str(input.hora), num(input.duracao_min), {
         precisaMesa: input.precisa_mesa != null ? bool(input.precisa_mesa) : undefined,
+        precisaPoltrona: input.precisa_poltrona != null ? bool(input.precisa_poltrona) : undefined,
         excluir: Array.isArray(input.excluir) ? (input.excluir as unknown[]).map((x) => str(x)) : undefined,
       });
       if (r.erro) return JSON.stringify({ ok: false, motivo: r.erro });

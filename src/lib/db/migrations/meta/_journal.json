@@ -120,6 +120,13 @@
       "when": 1784300774020,
       "tag": "0016_add_presente_planilha",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1784564523815,
+      "tag": "0017_add_tem_poltrona",
+      "breakpoints": true
     }
   ]
 }

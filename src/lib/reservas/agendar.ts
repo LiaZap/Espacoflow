@@ -9,6 +9,10 @@ import { registrarAuditoria } from "@/lib/audit/logger";
 import { calcularJanela, ABRE_MIN, JORNADA_MIN } from "./disponibilidade";
 import { debitarPacoteEmTx, registrarDebitoEmTx, SaldoError } from "./pacote-saldo";
 import { saldoCreditoEmTx, debitarCreditoEmTx } from "./credito";
+import { ordenarSalasPorPreferencia, casaSalaNome } from "./sala-preferencia";
+
+// Reexporta as regras puras de sala (quem já importava de "./agendar" continua funcionando).
+export { ordenarSalasPorPreferencia, casaSalaNome };
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
@@ -22,44 +26,6 @@ export interface SalaLivre {
   id: string;
   nome: string;
 }
-
-/**
- * Ordena salas livres pela preferência de mesa e depois pela prioridade de alocação.
- * - precisaMesa === true  → salas COM mesa primeiro;
- * - precisaMesa === false → salas SEM mesa primeiro (ex.: psicólogo → Sala 02);
- * - precisaMesa undefined  → só prioridade.
- * Nunca bloqueia: a sala "errada" fica no fim, mas segue elegível se for a única livre.
- */
-export function ordenarSalasPorPreferencia<T extends { prioridade: number | null; tem_mesa: boolean }>(
-  livres: T[],
-  precisaMesa?: boolean
-): T[] {
-  const pref = (s: T): number => {
-    if (precisaMesa === true) return s.tem_mesa ? 0 : 1;
-    if (precisaMesa === false) return s.tem_mesa ? 1 : 0;
-    return 0;
-  };
-  return [...livres].sort((a, b) => pref(a) - pref(b) || (a.prioridade ?? 99) - (b.prioridade ?? 99));
-}
-
-/**
- * Casa o nome da sala pedido pelo cliente com o nome cadastrado, tolerante a variações:
- * "Sala 03" ~ "Sala Privativa 03" ~ "03" ~ "3" (compara o NÚMERO da sala) e também
- * por igualdade/inclusão do texto normalizado. Serve p/ honrar a escolha explícita do cliente.
- */
-export function casaSalaNome(nome: string, pedido: string): boolean {
-  const norm = (s: string) =>
-    (s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
-  const n = norm(nome);
-  const p = norm(pedido);
-  if (!p) return false;
-  if (n === p) return true;
-  const numN = nome.match(/\d+/)?.[0];
-  const numP = pedido.match(/\d+/)?.[0];
-  if (numN && numP && parseInt(numN, 10) === parseInt(numP, 10)) return true;
-  return n.includes(p) || p.includes(n);
-}
-
 export function janelaSanitizada(data: string, hora: string, duracaoMin: number): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) return "Data inválida (use AAAA-MM-DD).";
   // Hora 00:00–23:59 (regex de formato aceitaria 19:99/25:00 — barramos aqui).
@@ -92,7 +58,7 @@ export async function consultarDisponibilidadeAgente(
   data: string,
   hora: string,
   duracaoMin: number,
-  opts?: { precisaMesa?: boolean; excluir?: string[] }
+  opts?: { precisaMesa?: boolean; precisaPoltrona?: boolean; excluir?: string[] }
 ): Promise<{ erro?: string; livres?: SalaLivre[] }> {
   const invalido = janelaSanitizada(data, hora, duracaoMin);
   if (invalido) return { erro: invalido };
@@ -101,7 +67,13 @@ export async function consultarDisponibilidadeAgente(
   if (inicio.getTime() <= Date.now()) return { erro: "Esse horário já passou — sugira uma data/hora futura." };
 
   const ativas = await db
-    .select({ id: salas.id, nome: salas.nome, prioridade: salas.prioridade_alocacao, tem_mesa: salas.tem_mesa })
+    .select({
+      id: salas.id,
+      nome: salas.nome,
+      prioridade: salas.prioridade_alocacao,
+      tem_mesa: salas.tem_mesa,
+      tem_poltrona: salas.tem_poltrona,
+    })
     .from(salas)
     .where(and(eq(salas.is_deleted, false), eq(salas.ativa, true)));
 
@@ -122,10 +94,13 @@ export async function consultarDisponibilidadeAgente(
   // Filtra pela necessidade de mesa JÁ informada: precisa de mesa → elimina salas SEM mesa
   // (ex.: Sala 02). Nunca ofertar sala incompatível com o perfil.
   if (opts?.precisaMesa === true) livres = livres.filter((s) => s.tem_mesa);
+  // Pediu poltrona reclinável → ELIMINA a sala sem poltrona (a 02). Filtro duro: nunca ofertar
+  // uma sala sem o que o cliente pediu, mesmo que ele tenha dito que não precisa de mesa.
+  if (opts?.precisaPoltrona === true) livres = livres.filter((s) => s.tem_poltrona);
   // Exclui salas já recusadas pelo cliente (para oferecer a PRÓXIMA compatível).
   if (opts?.excluir?.length) livres = livres.filter((s) => !opts.excluir!.some((n) => casaSalaNome(s.nome, n)));
-  // Ordena pela preferência (mesa + prioridade) — a 1ª é a recomendada (uma por vez).
-  const ordenadas = ordenarSalasPorPreferencia(livres, opts?.precisaMesa);
+  // Ordena pela preferência (poltrona > mesa > prioridade) — a 1ª é a recomendada.
+  const ordenadas = ordenarSalasPorPreferencia(livres, opts?.precisaMesa, opts?.precisaPoltrona);
   return { livres: ordenadas.map((s) => ({ id: s.id, nome: s.nome })) };
 }
 
