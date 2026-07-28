@@ -2,18 +2,19 @@
  * (SOLID: regra pura x orquestração) e reexportado por ele para não quebrar quem já importa. */
 /**
  * Ordena salas livres pela preferência do cliente e depois pela prioridade de alocação.
- * A POLTRONA vem antes da mesa: quem pede poltrona reclinável não pode cair na Sala 02
- * (a única sem poltrona) só porque disse que não precisa de mesa.
- * - precisaPoltrona === true → salas COM poltrona primeiro;
- * - precisaMesa === true  → salas COM mesa primeiro;
- * - precisaMesa === false → salas SEM mesa primeiro (ex.: psicólogo de conversa);
- * - undefined → só prioridade.
+ * PADRÃO = salas COM poltrona reclinável (01/03/04). A Sala 02 (única sem poltrona) é EXCEÇÃO:
+ * cai por último e só é recomendada quando as demais estão ocupadas — nunca vira o padrão só
+ * porque o cliente disse que não precisa de mesa. Assim a maioria (recorrentes) não recebe a 02
+ * por engano.
+ * - poltrona: SEMPRE preferida (sala sem poltrona vai pro fim);
+ * - precisaMesa === true  → entre as de poltrona, as COM mesa primeiro;
+ * - precisaMesa === false → as SEM mesa primeiro (só reordena entre as de poltrona);
  * Nunca bloqueia: a sala "errada" fica no fim, mas segue elegível se for a única livre.
  */
 export function ordenarSalasPorPreferencia<
   T extends { prioridade: number | null; tem_mesa: boolean; tem_poltrona?: boolean },
->(livres: T[], precisaMesa?: boolean, precisaPoltrona?: boolean): T[] {
-  const prefPoltrona = (s: T): number => (precisaPoltrona === true && s.tem_poltrona === false ? 1 : 0);
+>(livres: T[], precisaMesa?: boolean): T[] {
+  const prefPoltrona = (s: T): number => (s.tem_poltrona === false ? 1 : 0); // poltrona é o padrão
   const prefMesa = (s: T): number => {
     if (precisaMesa === true) return s.tem_mesa ? 0 : 1;
     if (precisaMesa === false) return s.tem_mesa ? 1 : 0;

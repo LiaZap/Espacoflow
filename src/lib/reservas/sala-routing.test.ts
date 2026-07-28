@@ -20,17 +20,18 @@ describe("roteamento de sala por necessidade de mesa", () => {
     expect(r[0].nome).toBe("Sala 01"); // com mesa + menor prioridade
   });
 
-  it("quem pede POLTRONA reclinável não cai na Sala 02, mesmo dizendo que não precisa de mesa", () => {
+  it("PADRÃO é poltrona: mesmo com precisaMesa=false a Sala 02 (sem poltrona) NÃO é a 1ª", () => {
     // Caso real (23/07): cliente disse "não preciso de mesa, preciso da cadeira reclinável".
-    // Só pela mesa, a 02 venceria — mas ela é a ÚNICA sem poltrona.
+    // Só pela mesa, a 02 venceria — mas ela é a ÚNICA sem poltrona, então cai por último.
     const comPoltrona = [
       { id: "s1", nome: "Sala 01", prioridade: 1, tem_mesa: true, tem_poltrona: true },
       { id: "s2", nome: "Sala 02", prioridade: 2, tem_mesa: false, tem_poltrona: false },
       { id: "s3", nome: "Sala 03", prioridade: 3, tem_mesa: true, tem_poltrona: true },
     ];
-    const r = ordenarSalasPorPreferencia(comPoltrona, false, true);
+    const r = ordenarSalasPorPreferencia(comPoltrona, false);
     expect(r[0].nome).not.toBe("Sala 02");
     expect(r[0].tem_poltrona).toBe(true);
+    expect(r[r.length - 1].nome).toBe("Sala 02"); // exceção: por último
   });
 
   it("sem preferência (undefined) ordena só por prioridade de alocação", () => {

@@ -190,7 +190,7 @@ async function blocoMemoria(clienteId: string): Promise<string> {
   const credito = await saldoCreditoCliente(clienteId).catch(() => 0);
   if (credito > 0) {
     linhas.push(
-      `- Crédito disponível: R$ ${credito}. É TUDO-OU-NADA: aplicado ao agendar SOMENTE se a reserva for de valor IGUAL OU MAIOR que R$ ${credito} (consome o crédito inteiro; o Pix cobre a diferença). Se a reserva for MENOR, o sistema NÃO aplica (credito_nao_aplicavel) — avise que só serve numa reserva de valor igual ou superior e siga o Pix normal. Não mande o cliente "combinar com a equipe".`
+      `- Crédito disponível: R$ ${credito} (TUDO-OU-NADA). Só é aplicado se a reserva for de valor IGUAL OU MAIOR que R$ ${credito} (consome o crédito inteiro; o Pix cobre a diferença). Se a reserva for MENOR, o sistema NÃO aplica (credito_nao_aplicavel): avise UMA vez que o crédito não serve nessa reserva por ser de valor menor, siga o Pix normal do valor cheio e NÃO fique reofertando/reanunciando o crédito nas próximas mensagens (não volte a dizer que "tem crédito" a cada resposta). Nunca mande "combinar com a equipe".`
     );
   }
   // Para cliente NOVO, sinaliza o que ainda falta no onboarding (o sistema bloqueia a
@@ -226,11 +226,16 @@ async function blocoMemoria(clienteId: string): Promise<string> {
     .orderBy(asc(reservas.inicio_em))
     .limit(5);
   if (confirmadas.length > 0) {
+    const hojeSP = new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+    const fmtData = (iso: string) => {
+      const [y, m, d] = iso.split("-");
+      return d && m && y ? `${d}/${m}/${y}` : iso;
+    };
     const itens = confirmadas
-      .map((r) => `${r.sala} em ${r.data} às ${(r.hora ?? "").slice(0, 5)}${r.pago === "pago" ? " (PAGA)" : ""}`)
+      .map((r) => `${r.sala} em ${fmtData(r.data)} às ${(r.hora ?? "").slice(0, 5)} (CONFIRMADA${r.pago === "pago" ? ", PAGA" : ""})`)
       .join("; ");
     linhas.push(
-      `- Reservas CONFIRMADAS deste cliente: ${itens}. Se ele perguntar sobre uma dessas (ex.: "qual sala?"), RESPONDA com esses dados. Se a reserva está PAGA/confirmada, NUNCA peça Pix nem comprovante de novo — o pagamento já foi tratado.`
+      `- Hoje é ${hojeSP} (America/Sao_Paulo). Reservas CONFIRMADAS e FUTURAS deste cliente (TODAS ainda vão acontecer, NENHUMA está concluída): ${itens}. O status vem do SISTEMA — NUNCA deduza que uma reserva "já passou" ou está "concluída" pela data (se a data é hoje ou depois, é futura). Se o cliente perguntar sobre uma delas (ex.: "qual sala?"), RESPONDA com esses dados. Se está PAGA, NUNCA peça Pix/comprovante de novo.`
     );
   }
 

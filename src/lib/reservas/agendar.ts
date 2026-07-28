@@ -58,7 +58,7 @@ export async function consultarDisponibilidadeAgente(
   data: string,
   hora: string,
   duracaoMin: number,
-  opts?: { precisaMesa?: boolean; precisaPoltrona?: boolean; excluir?: string[] }
+  opts?: { precisaMesa?: boolean; precisaPoltrona?: boolean; excluir?: string[]; clienteId?: string }
 ): Promise<{ erro?: string; livres?: SalaLivre[] }> {
   const invalido = janelaSanitizada(data, hora, duracaoMin);
   if (invalido) return { erro: invalido };
@@ -78,7 +78,7 @@ export async function consultarDisponibilidadeAgente(
     .where(and(eq(salas.is_deleted, false), eq(salas.ativa, true)));
 
   const ocupadas = await db
-    .select({ sala_id: reservas.sala_id })
+    .select({ sala_id: reservas.sala_id, cliente_id: reservas.cliente_id, status_pagamento: reservas.status_pagamento })
     .from(reservas)
     .where(
       and(
@@ -88,19 +88,27 @@ export async function consultarDisponibilidadeAgente(
         gt(reservas.fim_em, inicio)
       )
     );
-  const ocupado = new Set(ocupadas.map((o) => o.sala_id));
+  // Ignora o HOLD pendente do PRÓPRIO cliente: ele acabou de segurar esse horário, então não
+  // pode aparecer "ocupado" pra ele mesmo na re-consulta (era o flapping disponível→ocupado→
+  // disponível). Reservas confirmadas/pagas de terceiros continuam bloqueando (anti-overbooking).
+  const ocupado = new Set(
+    ocupadas
+      .filter((o) => !(opts?.clienteId && o.cliente_id === opts.clienteId && o.status_pagamento === "pendente"))
+      .map((o) => o.sala_id)
+  );
 
   let livres = ativas.filter((s) => !ocupado.has(s.id));
   // Filtra pela necessidade de mesa JÁ informada: precisa de mesa → elimina salas SEM mesa
   // (ex.: Sala 02). Nunca ofertar sala incompatível com o perfil.
   if (opts?.precisaMesa === true) livres = livres.filter((s) => s.tem_mesa);
-  // Pediu poltrona reclinável → ELIMINA a sala sem poltrona (a 02). Filtro duro: nunca ofertar
-  // uma sala sem o que o cliente pediu, mesmo que ele tenha dito que não precisa de mesa.
+  // Pediu poltrona reclinável explicitamente → ELIMINA a sala sem poltrona (a 02). Filtro duro:
+  // nunca ofertar uma sala sem o que o cliente pediu.
   if (opts?.precisaPoltrona === true) livres = livres.filter((s) => s.tem_poltrona);
   // Exclui salas já recusadas pelo cliente (para oferecer a PRÓXIMA compatível).
   if (opts?.excluir?.length) livres = livres.filter((s) => !opts.excluir!.some((n) => casaSalaNome(s.nome, n)));
-  // Ordena pela preferência (poltrona > mesa > prioridade) — a 1ª é a recomendada.
-  const ordenadas = ordenarSalasPorPreferencia(livres, opts?.precisaMesa, opts?.precisaPoltrona);
+  // Ordena pela preferência — poltrona é o PADRÃO (a 02, sem poltrona, cai por último e só é
+  // recomendada se as demais estiverem ocupadas). A 1ª é a recomendada (uma por vez).
+  const ordenadas = ordenarSalasPorPreferencia(livres, opts?.precisaMesa);
   return { livres: ordenadas.map((s) => ({ id: s.id, nome: s.nome })) };
 }
 

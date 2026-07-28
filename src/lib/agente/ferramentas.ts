@@ -111,6 +111,7 @@ export async function executarFerramentaAgenda(
         precisaMesa: input.precisa_mesa != null ? bool(input.precisa_mesa) : undefined,
         precisaPoltrona: input.precisa_poltrona != null ? bool(input.precisa_poltrona) : undefined,
         excluir: Array.isArray(input.excluir) ? (input.excluir as unknown[]).map((x) => str(x)) : undefined,
+        clienteId: ctx.clienteId, // ignora o hold pendente do próprio cliente na re-consulta
       });
       if (r.erro) return JSON.stringify({ ok: false, motivo: r.erro });
       const livres = r.livres ?? [];
@@ -307,7 +308,12 @@ export async function executarFerramentaAgenda(
       return JSON.stringify({
         ok: true,
         reservas: lista,
-        ...(lista.length === 0 ? { aviso: "O cliente não tem reservas futuras." } : {}),
+        ...(lista.length === 0
+          ? {
+              aviso:
+                "NENHUMA reserva futura encontrada para este cliente. Para cancelar/remarcar, NÃO conclua nada por conta própria e NÃO invente uma reserva. Peça ao cliente os dados da reserva original (dia, horário, sala) para localizar; se ainda não achar, avise que vai chamar a equipe e escale com [HUMANO].",
+            }
+          : {}),
       });
     }
 
@@ -324,7 +330,13 @@ export async function executarFerramentaAgenda(
         novaSalaNome: input.nova_sala != null && str(input.nova_sala).trim() ? str(input.nova_sala).trim() : undefined,
         novaDuracaoMin: input.nova_duracao_min != null ? num(input.nova_duracao_min) : undefined,
       });
-      if (r.erro) return JSON.stringify({ ok: false, motivo: r.erro });
+      if (r.erro)
+        return JSON.stringify({
+          ok: false,
+          motivo: r.erro,
+          instrucao:
+            "NÃO conclua a remarcação nem afirme que remarcou. Se a reserva não foi encontrada, peça ao cliente os dados da reserva original (dia/horário/sala) e tente localizar com listar_minhas_reservas; se mesmo assim não achar, avise que vai passar para a equipe e escale com [HUMANO].",
+        });
       return JSON.stringify({ ok: true, mensagem_para_o_cliente: r.mensagem });
     }
 
