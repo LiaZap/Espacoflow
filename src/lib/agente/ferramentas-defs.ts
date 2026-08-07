@@ -70,6 +70,11 @@ export const FERRAMENTAS_AGENDA = [
           description:
             "true se o cliente pediu/precisa de POLTRONA RECLINÁVEL (ex.: 'quero a cadeira reclinável', hipnose, terapia deitada). O sistema então NÃO oferece a Sala 02 — ela é a ÚNICA sem poltrona. Informe sempre que o cliente mencionar poltrona/cadeira reclinável.",
         },
+        sala_pedida: {
+          type: "string",
+          description:
+            "Nome da sala que o cliente PEDIU explicitamente (ex.: 'Sala 03'). SEMPRE informe quando ele citar uma sala: o sistema checa ESSA sala e responde se ela está livre ou ocupada, em vez de recomendar outra. Nunca diga que a sala pedida está indisponível sem passar este campo.",
+        },
         excluir: {
           type: "array",
           items: { type: "string" },

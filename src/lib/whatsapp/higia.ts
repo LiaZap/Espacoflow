@@ -7,13 +7,14 @@ import { montarPromptHigia } from "@/lib/agente/montar-prompt";
 import { registrarIaLog, lembrarMemoria } from "@/lib/mongo/client";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { getProvider } from "./provider";
-import { enviarHumanizado, limparTextoHigia } from "./humanizar";
+import { enviarHumanizado, limparTextoHigia, prometeAtendimentoHumano } from "./humanizar";
 import { extrairMarcadores, resolverMidia, urlMidiaAbsoluta, tipoWhatsapp } from "./midia-marcadores";
 import { extrairPix, montarMensagensPix } from "./pix";
 import { extrairTabela, montarTabelaPrecos } from "./tabela-precos";
 import { FERRAMENTAS_AGENDA, executarFerramentaAgenda } from "@/lib/agente/ferramentas";
 import { processarComprovanteHigia } from "./comprovante-higia";
 import { enviarOnboardingPacoteCredito } from "./boas-vindas";
+import { enviarResumoReservas } from "./resumo-reserva";
 
 export interface ResultadoHigia {
   enviada: boolean;
@@ -229,12 +230,19 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
   } catch (e) {
     return { enviada: false, motivo: String(e) };
   }
-  if (!texto) return { enviada: false, motivo: "resposta vazia" };
+  // Resposta VAZIA (loop estourado, truncou em max_tokens, erro no fechamento): o cliente NÃO
+  // pode ficar sem retorno. Em vez de silêncio, manda um acolhimento e passa para a equipe.
+  if (!texto) {
+    texto = "Deixa eu confirmar isso com a equipe pra te responder com segurança, tá? Já te retorno por aqui 🙏";
+  }
   texto = limparTextoHigia(texto);
 
   // GUARDRAIL: a Hígia escala com [HUMANO] e NUNCA confirma pagamento/reserva.
   let escalar = /\[\s*HUMANO\s*\]/iu.test(texto);
   texto = texto.replace(/\[\s*HUMANO\s*\]/giu, "").trim();
+  // Se ela PROMETEU passar para a equipe mas esqueceu o marcador, o sistema escala de qualquer
+  // forma — promessa de handoff sem handoff deixava o cliente esperando por ninguém (S/M1).
+  if (!escalar && prometeAtendimentoHumano(texto)) escalar = true;
   let violou = false;
   // Segunda linha de defesa pós-LLM (recall priorizado: falso-positivo só escala).
   // Cobre substantivo+verbo, verbo+substantivo, confirmações curtas e coloquiais.
@@ -393,6 +401,13 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
         id_externo: envio.idExterno ?? null,
       });
     }
+  }
+
+  // Reserva confirmada por SALDO/CRÉDITO: o resumo padrão (uma info por linha) é enviado pelo
+  // SISTEMA, no mesmo formato do fluxo de comprovante — o texto do LLM não condensa mais tudo
+  // numa linha nem inventa o layout da confirmação.
+  if (reservasConfirmadasIds.length > 0 && telefone) {
+    blocosTexto += await enviarResumoReservas({ reservaIds: reservasConfirmadasIds, conversaId, telefone });
   }
 
   // Onboarding/acesso em reserva paga por PACOTE/CRÉDITO (o fluxo de comprovante Pix não roda

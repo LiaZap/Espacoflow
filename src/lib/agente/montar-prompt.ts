@@ -7,6 +7,7 @@ import { salas } from "@/lib/db/schema/salas";
 import { obterMemoria } from "@/lib/mongo/client";
 import { pacoteAtivoDoCliente } from "@/lib/reservas/pacote-saldo";
 import { saldoCreditoCliente } from "@/lib/reservas/credito";
+import { clienteRecorrente } from "./onboarding";
 import { slugMidia } from "@/lib/whatsapp/midia-marcadores";
 import { formatarBRL } from "@/lib/utils";
 import { PROMPT_BASE_HIGIA } from "./prompt-base";
@@ -33,11 +34,17 @@ export async function montarPromptHigia(opts?: {
     .where(and(eq(agentePrecos.is_deleted, false), eq(agentePrecos.ativo, true)))
     .orderBy(asc(agentePrecos.ordem));
 
-  const base = await db
+  const baseTudo = await db
     .select()
     .from(agenteBaseConhecimento)
     .where(and(eq(agenteBaseConhecimento.is_deleted, false), eq(agenteBaseConhecimento.ativo, true)))
     .orderBy(asc(agenteBaseConhecimento.prioridade));
+
+  // RECORRENTE: o item de "cadastro" (que contém o link do formulário) sai do CONTEXTO. O
+  // modelo não manda um link que ele não tem — determinístico, não é só instrução. Junto com o
+  // gate duro das ferramentas, isso mata o "recorrente recebendo pedido de cadastro".
+  const recorrente = opts?.clienteId ? await clienteRecorrente(opts.clienteId) : false;
+  const base = recorrente ? baseTudo.filter((b) => b.categoria !== "cadastro") : baseTudo;
 
   const persona = config?.prompt_sistema?.trim() || PROMPT_BASE_HIGIA;
 
@@ -92,7 +99,12 @@ export async function montarPromptHigia(opts?: {
   const midia = await blocoMidia();
   const memoria = opts?.clienteId ? await blocoMemoria(opts.clienteId) : "";
   const agenda = opts?.agendamento ? blocoAgendamento() : "";
-  return prompt + agenda + pix + midia + memoria;
+  // Diretiva de RECORRENTE no TOPO do system (antes ela só existia no fim, enterrada depois de
+  // ~15k caracteres — daí a intermitência de pedir cadastro a quem já é cliente).
+  const topoRecorrente = recorrente
+    ? "<cliente_recorrente>\nESTE CLIENTE É RECORRENTE e JÁ ESTÁ CADASTRADO (qualificado e com aceite registrado). NÃO faça perguntas de qualificação (tipo de uso, pessoas, maca), NÃO peça cadastro, NÃO peça aceite de política e NÃO envie link de formulário — em NENHUMA circunstância. Vá direto ao que ele pediu (reservar, cancelar, alterar, dúvida).\n</cliente_recorrente>\n\n"
+    : "";
+  return topoRecorrente + prompt + agenda + pix + midia + memoria;
 }
 
 /** Instrui a Hígia a AGENDAR sozinha usando as ferramentas (tool use). */

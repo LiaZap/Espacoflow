@@ -127,6 +127,13 @@
       "when": 1784564523815,
       "tag": "0017_add_tem_poltrona",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1786138948163,
+      "tag": "0018_add_sala_preferida",
+      "breakpoints": true
     }
   ]
 }

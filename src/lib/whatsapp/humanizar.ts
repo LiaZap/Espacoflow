@@ -9,6 +9,27 @@ const MAX_MS = 6000;
 const PAUSA_ENTRE_MS = 600;
 
 /**
+ * Detecta que a Hígia PROMETEU atendimento humano no texto (ex.: "vou passar para a equipe",
+ * "vou chamar a equipe", "encaminhar para o suporte"). Se ela prometeu mas não escreveu o
+ * marcador [HUMANO], o sistema escala de qualquer forma — prometer handoff e não entregar deixa
+ * o cliente esperando por ninguém (casos S e M1). Erra para o lado seguro: um handoff extra é
+ * melhor que um cliente abandonado (a equipe devolve a conversa em um clique no painel).
+ */
+export function prometeAtendimentoHumano(texto: string): boolean {
+  const t = (texto ?? "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase();
+  // verbo de encaminhar + alvo humano (equipe/suporte/atendente/recepção/responsável)
+  const alvo = "(equipe|suporte|atendent|recep|respons|humano|colega)";
+  const verbo =
+    "(vou|irei|vamos|estou|to|acionar|acionando|encaminh|transferi|transfer|passar|passo|chamar|chamo|falar com|verificar com|consultar|pedir para)";
+  const re = new RegExp(`\\b${verbo}\\b[^.!?\\n]{0,40}\\b${alvo}`, "i");
+  const re2 = new RegExp(`\\b${alvo}\\w*\\b[^.!?\\n]{0,30}\\b(vai|ira|entrar[aá]? em contato|te retorna|responde)`, "i");
+  return re.test(t) || re2.test(t);
+}
+
+/**
  * Normaliza a saída da Hígia para ficar "humana" e válida no WhatsApp:
  * - negrito markdown `**x**` → `*x*` (WhatsApp usa um asterisco só)
  * - remove travessão (—/–) e hífen solto entre espaços (cara de IA) → vírgula

@@ -1,11 +1,43 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { clientes, clientesConsentimentos } from "@/lib/db/schema/clientes";
+import { reservas } from "@/lib/db/schema/reservas";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { verificarCadastro, cadastroSheetConfigurado } from "@/lib/google/cadastro-sheet";
 
 /** Máximo de pessoas por sala (acima disso o cliente está fora do perfil). */
 export const MAX_PESSOAS = 3;
+
+/** Decisão PURA de recorrente (testável sem banco). */
+export function ehRecorrente(statusLead: string | null | undefined, temReservaPassada: boolean): boolean {
+  return statusLead === "cliente" || temReservaPassada;
+}
+
+/**
+ * Recorrente = já é "cliente" na base OU já teve reserva confirmada/concluída. FONTE ÚNICA da
+ * regra, usada pelo prompt e pelo gate duro das ferramentas de cadastro (o gate de agendar.ts
+ * aplica a mesma definição). Recorrente NUNCA deve receber pedido de cadastro/aceite.
+ */
+export async function clienteRecorrente(clienteId: string): Promise<boolean> {
+  const [cli] = await db
+    .select({ status: clientes.status_lead })
+    .from(clientes)
+    .where(and(eq(clientes.id, clienteId), eq(clientes.is_deleted, false)));
+  if (!cli) return false;
+  if (cli.status === "cliente") return true;
+  const [passada] = await db
+    .select({ id: reservas.id })
+    .from(reservas)
+    .where(
+      and(
+        eq(reservas.cliente_id, clienteId),
+        eq(reservas.is_deleted, false),
+        inArray(reservas.status_reserva, ["confirmada", "concluida"])
+      )
+    )
+    .limit(1);
+  return ehRecorrente(cli.status, Boolean(passada));
+}
 
 /** Mensagem oficial para cliente fora do perfil (maca/procedimento ou grupo > 3). */
 export const MSG_FORA_PERFIL =

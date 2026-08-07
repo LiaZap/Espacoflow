@@ -108,7 +108,22 @@ export async function consultarDisponibilidadeAgente(
   if (opts?.excluir?.length) livres = livres.filter((s) => !opts.excluir!.some((n) => casaSalaNome(s.nome, n)));
   // Ordena pela preferência — poltrona é o PADRÃO (a 02, sem poltrona, cai por último e só é
   // recomendada se as demais estiverem ocupadas). A 1ª é a recomendada (uma por vez).
-  const ordenadas = ordenarSalasPorPreferencia(livres, opts?.precisaMesa);
+  let ordenadas = ordenarSalasPorPreferencia(livres, opts?.precisaMesa);
+
+  // PERFIL DE SALA do cliente (clientes.sala_preferida, definido pela equipe no painel): se a
+  // sala do perfil dele está livre, ela vem PRIMEIRO — respeita o perfil já conhecido em vez do
+  // padrão global (ex.: cliente com perfil de Sala 02 não é mandado para a 01).
+  if (opts?.clienteId && ordenadas.length > 1) {
+    const [cli] = await db
+      .select({ pref: clientes.sala_preferida })
+      .from(clientes)
+      .where(and(eq(clientes.id, opts.clienteId), eq(clientes.is_deleted, false)));
+    const pref = cli?.pref?.trim();
+    if (pref) {
+      const idx = ordenadas.findIndex((s) => casaSalaNome(s.nome, pref));
+      if (idx > 0) ordenadas = [ordenadas[idx], ...ordenadas.filter((_, i) => i !== idx)];
+    }
+  }
   return { livres: ordenadas.map((s) => ({ id: s.id, nome: s.nome })) };
 }
 

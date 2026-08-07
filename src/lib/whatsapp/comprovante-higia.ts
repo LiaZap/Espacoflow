@@ -15,6 +15,7 @@ import { formatarDataCurta, formatarHoraCurta } from "@/lib/utils";
 import { getProvider } from "./provider";
 import { enviarHumanizado } from "./humanizar";
 import { enviarBoasVindas } from "./boas-vindas";
+import { resumoReservaTexto } from "./resumo-reserva";
 
 export interface ResultadoComprovante {
   tratou: boolean; // true = era comprovante e nós tratamos (não cai no LLM)
@@ -137,24 +138,6 @@ async function responderUnico(conversaId: string, telefone: string, texto: strin
 }
 
 /** Resumo da reserva no layout do espaço (data, sala, início, término, horas, confirmada). */
-function resumoReservaTexto(d: {
-  data: string;
-  duracao_min: number;
-  inicio_em: Date | null;
-  fim_em: Date | null;
-  sala: string;
-}): string {
-  const horas = d.duracao_min / 60;
-  const lblHoras = horas === 1 ? "1 hora" : `${horas % 1 === 0 ? horas : horas.toFixed(1)} horas`;
-  return [
-    formatarDataCurta(d.data),
-    d.sala,
-    `Início: ${d.inicio_em ? formatarHoraCurta(d.inicio_em) : "—"}`,
-    `Término: ${d.fim_em ? formatarHoraCurta(d.fim_em) : "—"}`,
-    lblHoras,
-    "✅ Reserva confirmada",
-  ].join("\n");
-}
 
 /**
  * Processa um comprovante enviado pelo CLIENTE no chat. A validação é feita em

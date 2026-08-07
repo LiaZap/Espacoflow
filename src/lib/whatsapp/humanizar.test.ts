@@ -1,5 +1,32 @@
 import { describe, it, expect } from "vitest";
-import { picarMensagem } from "./humanizar";
+import { picarMensagem, prometeAtendimentoHumano } from "./humanizar";
+
+describe("prometeAtendimentoHumano (escalação garantida)", () => {
+  it("detecta a promessa de handoff (sem o marcador [HUMANO]) e escala", () => {
+    for (const t of [
+      "Vou passar para a nossa equipe verificar isso pra você!",
+      "Deixa eu chamar a equipe pra te ajudar com o crédito.",
+      "Vou encaminhar para o suporte confirmar a disponibilidade.",
+      "Vou verificar com a equipe e te retorno.",
+      "A equipe vai entrar em contato com você.",
+      "Vou transferir seu atendimento para um atendente.",
+    ]) {
+      expect(prometeAtendimentoHumano(t), t).toBe(true);
+    }
+  });
+
+  it("não escala à toa em mensagens normais do fluxo", () => {
+    for (const t of [
+      "A Sala 02 está disponível no dia 13/07 às 10h. Quer ficar com ela?",
+      "Pra confirmar, me envia aqui o comprovante do Pix, tá?",
+      "Recebi seu comprovante! 🙏",
+      "Já segurei o seu horário! Sala 01, 20/07 às 14h.",
+      "Seu saldo restante é de 18 horas.",
+    ]) {
+      expect(prometeAtendimentoHumano(t), t).toBe(false);
+    }
+  });
+});
 
 describe("picarMensagem (mensagens picadas como humano)", () => {
   it("mantém mensagem curta em um único bloco", () => {

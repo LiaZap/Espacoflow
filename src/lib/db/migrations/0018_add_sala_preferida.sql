@@ -1,0 +1,1 @@
+ALTER TABLE "clientes" ADD COLUMN "sala_preferida" text;

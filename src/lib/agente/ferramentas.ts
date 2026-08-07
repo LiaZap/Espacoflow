@@ -1,4 +1,5 @@
 import { consultarDisponibilidadeAgente, agendarReservaAgente } from "@/lib/reservas/agendar";
+import { casaSalaNome } from "@/lib/reservas/sala-preferencia";
 import { calcularPrecoAvulsa, precoAvulsaDiaDetalhe } from "@/lib/reservas/preco";
 import { pacoteAtivoDoCliente, comprarPacoteAgente } from "@/lib/reservas/pacote-saldo";
 import { saldoCreditoCliente } from "@/lib/reservas/credito";
@@ -7,7 +8,7 @@ import {
   cancelarReservaAgente,
   alterarReservaAgente,
 } from "@/lib/reservas/agente-recorrente";
-import { registrarQualificacao, confirmarCadastroPlanilha } from "./onboarding";
+import { registrarQualificacao, confirmarCadastroPlanilha, clienteRecorrente } from "./onboarding";
 
 export { FERRAMENTAS_AGENDA } from "./ferramentas-defs";
 
@@ -32,6 +33,20 @@ export async function executarFerramentaAgenda(
   ctx: { clienteId: string }
 ): Promise<string> {
   try {
+    // GATE DURO DE RECORRENTE: cliente já cadastrado NUNCA recebe pedido de cadastro/aceite.
+    // Se o LLM chamar essas ferramentas por engano (é intermitente), elas viram NO-OP: não
+    // tocam no banco, não leem planilha e não devolvem instrução de mandar link de formulário.
+    if (nome === "qualificar_cliente" || nome === "confirmar_cadastro") {
+      if (await clienteRecorrente(ctx.clienteId)) {
+        return JSON.stringify({
+          ok: true,
+          ja_cadastrado: true,
+          instrucao:
+            "Cliente RECORRENTE já cadastrado (qualificado e com aceite). NÃO peça cadastro, NÃO mande link de formulário, NÃO peça aceite e NÃO faça perguntas de qualificação. Siga direto para o que o cliente pediu (consultar_disponibilidade / agendar_reserva).",
+        });
+      }
+    }
+
     if (nome === "calcular_preco") {
       const lista = Array.isArray(input.sessoes) ? (input.sessoes as Array<Record<string, unknown>>) : [];
       const sessoes = lista.map((s) => ({ data: str(s.data), horas: num(s.horas) }));
@@ -107,9 +122,13 @@ export async function executarFerramentaAgenda(
     }
 
     if (nome === "consultar_disponibilidade") {
+      // Sala PEDIDA pelo cliente vence os filtros de mesa/poltrona (a escolha dele tem
+      // prioridade) — sem isso a sala pedida podia nem entrar na lista e a Hígia dizia que
+      // estava indisponível com ela livre.
+      const salaPedida = input.sala_pedida != null && str(input.sala_pedida).trim() ? str(input.sala_pedida).trim() : undefined;
       const r = await consultarDisponibilidadeAgente(str(input.data), str(input.hora), num(input.duracao_min), {
-        precisaMesa: input.precisa_mesa != null ? bool(input.precisa_mesa) : undefined,
-        precisaPoltrona: input.precisa_poltrona != null ? bool(input.precisa_poltrona) : undefined,
+        precisaMesa: salaPedida ? undefined : input.precisa_mesa != null ? bool(input.precisa_mesa) : undefined,
+        precisaPoltrona: salaPedida ? undefined : input.precisa_poltrona != null ? bool(input.precisa_poltrona) : undefined,
         excluir: Array.isArray(input.excluir) ? (input.excluir as unknown[]).map((x) => str(x)) : undefined,
         clienteId: ctx.clienteId, // ignora o hold pendente do próprio cliente na re-consulta
       });
@@ -120,6 +139,31 @@ export async function executarFerramentaAgenda(
           ok: true,
           disponivel: false,
           aviso: "Nenhuma sala compatível livre nesse horário. Ofereça outro horário/dia. NÃO liste salas.",
+        });
+      }
+
+      // Cliente pediu uma sala específica: responde sobre ELA (livre → recomenda ela; ocupada →
+      // diz que está ocupada e oferece a alternativa). Determinístico, não depende do LLM.
+      if (salaPedida) {
+        const achada = livres.find((s) => casaSalaNome(s.nome, salaPedida));
+        if (achada) {
+          return JSON.stringify({
+            ok: true,
+            disponivel: true,
+            sala_pedida_disponivel: true,
+            sala_recomendada: achada.nome,
+            sala_recomendada_id: achada.id,
+            instrucao: `A ${achada.nome} que o cliente PEDIU está LIVRE nesse horário. Confirme com ele a ${achada.nome} (NÃO ofereça outra sala) e, ao aceitar, agende com sala_id = sala_recomendada_id.`,
+          });
+        }
+        return JSON.stringify({
+          ok: true,
+          disponivel: true,
+          sala_pedida_disponivel: false,
+          sala_pedida: salaPedida,
+          sala_recomendada: livres[0].nome,
+          sala_recomendada_id: livres[0].id,
+          instrucao: `A ${salaPedida} que o cliente pediu está OCUPADA nesse horário. Diga isso com clareza e ofereça a ${livres[0].nome} como alternativa (uma sala por vez). Se ele aceitar, agende com sala_id = sala_recomendada_id.`,
         });
       }
       // Recomenda UMA sala por vez (nunca a lista toda, nunca comparar salas entre si).
@@ -159,18 +203,28 @@ export async function executarFerramentaAgenda(
       }
 
       // Pagamento por SALDO de pacote (recorrente): resolve o pacote ativo no servidor.
+      // O saldo do pacote é usado por PADRÃO quando existe e cobre a reserva — o cliente já
+      // pagou por essas horas, então NUNCA pedir Pix tendo saldo (não depende do LLM marcar
+      // usar_saldo, que era esquecido e gerava cobrança indevida).
       let pacoteClienteId: string | undefined;
-      if (usarSaldo) {
-        const pac = await pacoteAtivoDoCliente(ctx.clienteId);
-        if (!pac) {
-          return JSON.stringify({ ok: false, motivo: "O cliente não tem pacote com saldo ativo — siga pelo Pix (avulsa)." });
-        }
-        pacoteClienteId = pac.id;
+      const pacAtivo = await pacoteAtivoDoCliente(ctx.clienteId);
+      const horasReserva = Math.round((duracaoMin / 60) * 100) / 100;
+      const saldoCobre = !!pacAtivo && pacAtivo.horasSaldo >= horasReserva;
+      if (usarSaldo && !pacAtivo) {
+        return JSON.stringify({ ok: false, motivo: "O cliente não tem pacote com saldo ativo — siga pelo Pix (avulsa)." });
       }
+      if (usarSaldo && pacAtivo && !saldoCobre) {
+        return JSON.stringify({
+          ok: false,
+          motivo: `O saldo do pacote (${pacAtivo.horasSaldo}h) não cobre ${horasReserva}h. Avise o cliente e ofereça uma duração que caiba no saldo, ou siga pelo Pix.`,
+        });
+      }
+      if (saldoCobre) pacoteClienteId = pacAtivo!.id; // usa o saldo por padrão
+      const pagoPorSaldo = !!pacoteClienteId;
 
       // Avulsa (Pix): só agenda durações que existem na tabela. 1h30 e afins → oferecer
       // as opções vizinhas, sem inventar valor proporcional (nem criar reserva sem preço).
-      if (!usarSaldo) {
+      if (!pagoPorSaldo) {
         const det = precoAvulsaDiaDetalhe(duracaoMin / 60);
         if (!det.exato) {
           const ops = (det.vizinhas ?? []).map((v) => `${v.horas}h por R$ ${v.valor}`).join(" ou ");
@@ -182,7 +236,7 @@ export async function executarFerramentaAgenda(
       }
 
       let valor = input.valor != null ? num(input.valor) : undefined;
-      if (!usarSaldo && (valor == null || valor <= 0)) {
+      if (!pagoPorSaldo && (valor == null || valor <= 0)) {
         // Deriva o valor avulso no servidor quando o LLM não envia — sem isso o
         // pagamento nasce com valor null e TODA leitura de comprovante consta como
         // "divergente" no painel de inconsistências.
@@ -198,7 +252,7 @@ export async function executarFerramentaAgenda(
         finalidade: input.finalidade ? str(input.finalidade) : undefined,
         salaId: input.sala_id != null && str(input.sala_id).trim() ? str(input.sala_id).trim() : undefined,
         salaNome: input.sala != null && str(input.sala).trim() ? str(input.sala).trim() : undefined,
-        valor: usarSaldo ? undefined : valor,
+        valor: pagoPorSaldo ? undefined : valor,
         precisaMesa: input.precisa_mesa != null ? bool(input.precisa_mesa) : undefined,
         pacoteClienteId,
       });
@@ -226,7 +280,7 @@ export async function executarFerramentaAgenda(
           pago_por: "pacote",
           saldo_restante: r.saldoApos,
           proximo_passo:
-            "Reserva CONFIRMADA usando o saldo do pacote (NÃO peça Pix). Diga ao cliente que está confirmada e informe o saldo restante de horas.",
+            "Reserva CONFIRMADA usando o saldo do pacote (NÃO peça Pix). O SISTEMA já envia o resumo formatado da reserva (data, sala, início, término) — NÃO repita esses dados. Escreva só uma frase curta confirmando e informe o saldo restante de horas.",
         });
       }
       if (r.viaCredito && r.jaPago) {
@@ -238,7 +292,7 @@ export async function executarFerramentaAgenda(
           pago_por: "credito",
           credito_aplicado: r.creditoAplicado,
           proximo_passo:
-            "Reserva CONFIRMADA usando o CRÉDITO do cliente (NÃO peça Pix). Diga que aplicou o crédito e confirme data, horário e sala.",
+            "Reserva CONFIRMADA usando o CRÉDITO do cliente (NÃO peça Pix). O SISTEMA já envia o resumo formatado da reserva — NÃO repita data/horário/sala. Escreva só uma frase curta dizendo que aplicou o crédito.",
         });
       }
       if (r.viaCredito && !r.jaPago) {

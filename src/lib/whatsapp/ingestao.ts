@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { clientes } from "@/lib/db/schema/clientes";
 import { variantesTelefoneBR, canonicalTelefoneBR } from "./telefone";
@@ -151,6 +151,27 @@ export async function ingerirMensagemRecebida(m: MensagemNormalizada): Promise<R
           .insert(whatsappConversas)
           .values({ cliente_id: cli.id, status: "higia", ultima_mensagem_em: new Date(), nao_lidas: 0 })
           .returning();
+      }
+
+      // ECO do NOSSO próprio envio: a Evolution reentrega o que a Hígia mandou como
+      // messages.upsert fromMe. Quando ela NÃO devolve key.id, gravamos id_externo NULL e o
+      // dedupe abaixo não protege — o eco entrava como "humano" e CALAVA a Hígia para sempre
+      // nessa conversa (cliente sem resposta até alguém devolver no painel). Aqui casamos o eco
+      // por conteúdo/tipo numa janela curta e tratamos como duplicada.
+      if (m.fromMe) {
+        const [eco] = await tx
+          .select({ id: whatsappMensagens.id })
+          .from(whatsappMensagens)
+          .where(
+            and(
+              eq(whatsappMensagens.conversa_id, c.id),
+              eq(whatsappMensagens.origem, "higia"),
+              gt(whatsappMensagens.created_at, new Date(Date.now() - 10 * 60_000)),
+              m.texto ? eq(whatsappMensagens.conteudo, m.texto) : eq(whatsappMensagens.tipo, m.tipo)
+            )
+          )
+          .limit(1);
+        if (eco) throw new MensagemDuplicada(); // é o nosso envio voltando, não um humano assumindo
       }
 
       // Mensagem com guarda atômica de duplicidade (índice único uq_mensagens_externo).

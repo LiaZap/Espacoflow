@@ -89,6 +89,17 @@ export function ClienteForm({ cliente }: { cliente?: Cliente }) {
         </Campo>
       </div>
 
+      <Campo label="Perfil de sala (opcional)">
+        <Input
+          name="sala_preferida"
+          placeholder="Ex: Sala 02"
+          defaultValue={cliente?.sala_preferida ?? ""}
+        />
+        <p className="mt-1 text-xs text-muted-foreground">
+          Se preenchido, a Hígia oferece essa sala primeiro quando estiver livre (respeita o perfil do cliente).
+        </p>
+      </Campo>
+
       <Campo label="Interesses">
         <Textarea name="interesses" defaultValue={cliente?.interesses ?? ""} />
       </Campo>

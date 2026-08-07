@@ -17,6 +17,8 @@ export const clienteSchema = z.object({
   interesses: z.string().trim().optional(),
   dores: z.string().trim().optional(),
   origem: z.string().trim().optional(),
+  // Perfil de sala: quando preenchido, a Hígia prioriza essa sala se estiver livre.
+  sala_preferida: z.string().trim().optional(),
 });
 
 export type ClienteInput = z.infer<typeof clienteSchema>;

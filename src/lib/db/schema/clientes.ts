@@ -40,6 +40,9 @@ export const clientes = pgTable(
     // Exibição no painel: clientes geridos pela planilha que saíram dela ficam false (somem das
     // listas), mas seguem no banco (histórico/relatórios). Default true (leads/novos aparecem).
     presente_planilha: boolean("presente_planilha").notNull().default(true),
+    // PERFIL DE SALA do cliente (nome da sala, ex.: "Sala 02"). Quando preenchido, a Hígia
+    // prioriza ESSA sala se estiver livre — respeita o perfil já conhecido em vez do padrão.
+    sala_preferida: text("sala_preferida"),
 
     created_at: timestamp("created_at").notNull().defaultNow(),
     updated_at: timestamp("updated_at").notNull().defaultNow(),
