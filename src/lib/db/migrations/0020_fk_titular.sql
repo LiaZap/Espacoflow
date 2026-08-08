@@ -1,0 +1,1 @@
+ALTER TABLE "clientes" ADD CONSTRAINT "clientes_titular_id_clientes_id_fk" FOREIGN KEY ("titular_id") REFERENCES "public"."clientes"("id") ON DELETE restrict ON UPDATE no action;

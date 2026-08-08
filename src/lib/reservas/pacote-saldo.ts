@@ -9,6 +9,7 @@ import {
 import { pagamentos } from "@/lib/db/schema/pagamentos";
 import { reservas } from "@/lib/db/schema/reservas";
 import { hojeSaoPaulo } from "./disponibilidade";
+import { idDoSaldo } from "./titular";
 
 /** Tipo da transação Drizzle (mesmo `tx` do db.transaction). */
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -27,7 +28,9 @@ export interface PacoteAtivo {
  * Pacote ATIVO do cliente (status ativo, saldo > 0, dentro da validade). Se houver mais
  * de um, devolve o que vence primeiro (consome o mais perto de expirar). null se não há.
  */
-export async function pacoteAtivoDoCliente(clienteId: string): Promise<PacoteAtivo | null> {
+export async function pacoteAtivoDoCliente(clienteIdOriginal: string): Promise<PacoteAtivo | null> {
+  // Empresa com 2 contatos: o saldo é do TITULAR (os dois contatos consomem o mesmo).
+  const clienteId = await idDoSaldo(clienteIdOriginal);
   const hoje = hojeSaoPaulo();
   const [cp] = await db
     .select({
@@ -68,7 +71,10 @@ export async function debitarPacoteEmTx(
     .where(and(eq(clientesPacotes.id, params.pacoteClienteId), eq(clientesPacotes.is_deleted, false)))
     .for("update");
   if (!cp) throw new SaldoError("Não encontrei esse pacote.");
-  if (cp.cliente_id !== params.clienteId) throw new SaldoError("Esse pacote não é deste cliente.");
+  // O pacote pode ser do próprio cliente OU do TITULAR (empresa com 2 contatos autorizados).
+  if (cp.cliente_id !== params.clienteId && cp.cliente_id !== (await idDoSaldo(params.clienteId, tx))) {
+    throw new SaldoError("Esse pacote não é deste cliente.");
+  }
   if (cp.status !== "ativo") throw new SaldoError("O pacote ainda não está ativo.");
   if (String(cp.valido_ate) < hojeSaoPaulo()) throw new SaldoError("O pacote venceu — o saldo não pode mais ser usado.");
   const saldo = Number(cp.horas_saldo);
@@ -126,14 +132,18 @@ export async function comprarPacoteAgente(
 
   try {
     const r = await db.transaction(async (tx) => {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${clienteId}))`);
+      // O pacote pertence ao DONO DO SALDO (titular, se a empresa tem 2 contatos) — senão o
+      // pacote nasceria no contato e a leitura (que olha o titular) nunca o veria: saldo órfão
+      // e cliente pagando de novo. Lock e idempotência usam a mesma chave.
+      const donoSaldo = await idDoSaldo(clienteId, tx);
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${donoSaldo}))`);
       // Idempotência: já há compra PENDENTE do mesmo pacote? Reaproveita (não duplica).
       const [existente] = await tx
         .select({ id: clientesPacotes.id })
         .from(clientesPacotes)
         .where(
           and(
-            eq(clientesPacotes.cliente_id, clienteId),
+            eq(clientesPacotes.cliente_id, donoSaldo),
             eq(clientesPacotes.pacote_id, escolhido.id),
             eq(clientesPacotes.is_deleted, false),
             eq(clientesPacotes.status, "pendente_pagamento")
@@ -144,7 +154,7 @@ export async function comprarPacoteAgente(
       const [cp] = await tx
         .insert(clientesPacotes)
         .values({
-          cliente_id: clienteId,
+          cliente_id: donoSaldo,
           pacote_id: escolhido.id,
           horas_total: String(horas),
           horas_consumidas: "0",
@@ -243,7 +253,12 @@ export async function ajustarSaldoPorDeltaEmTx(
     .where(and(eq(clientesPacotes.id, params.pacoteClienteId), eq(clientesPacotes.is_deleted, false)))
     .for("update");
   if (!cp) throw new SaldoError("Não encontrei o pacote dessa reserva.");
-  if (cp.cliente_id !== params.clienteId) throw new SaldoError("Esse pacote não é deste cliente.");
+  // Aceita o pacote do próprio cliente OU do TITULAR (empresa com 2 contatos) — sem isso,
+  // alterar a duração de uma reserva paga com saldo compartilhado falhava sempre e as horas
+  // debitadas nunca voltavam ao saldo.
+  if (cp.cliente_id !== params.clienteId && cp.cliente_id !== (await idDoSaldo(params.clienteId, tx))) {
+    throw new SaldoError("Esse pacote não é deste cliente.");
+  }
 
   const saldo = Number(cp.horas_saldo);
   if (delta > 0) {

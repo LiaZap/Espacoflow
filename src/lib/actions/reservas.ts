@@ -19,6 +19,7 @@ import {
 } from "@/lib/reservas/disponibilidade";
 import { sincronizarReserva, removerEventoReserva } from "@/lib/google/calendar";
 import { creditarCancelamentoReaisEmTx } from "@/lib/reservas/credito";
+import { idDoSaldo } from "@/lib/reservas/titular";
 import { exigirPermissao, primeiroErro } from "./_helpers";
 
 class ReservaError extends Error {}
@@ -99,7 +100,12 @@ export async function criarReserva(_prev: FormState, formData: FormData): Promis
           .where(and(eq(clientesPacotes.id, d.pacote_cliente_id), eq(clientesPacotes.is_deleted, false)))
           .for("update");
         if (!cp) throw new ReservaError("Pacote do cliente não encontrado.");
-        if (cp.cliente_id !== d.cliente_id) throw new ReservaError("O pacote não pertence a este cliente.");
+        // Aceita o pacote do próprio cliente OU do TITULAR (empresa com 2 contatos autorizados
+        // consumindo um saldo só) — senão o painel não conseguiria registrar a reserva do
+        // contato usando o saldo compartilhado.
+        if (cp.cliente_id !== d.cliente_id && cp.cliente_id !== (await idDoSaldo(d.cliente_id, tx))) {
+          throw new ReservaError("O pacote não pertence a este cliente.");
+        }
         if (cp.status !== "ativo") throw new ReservaError("Este pacote ainda não está ativo (pagamento pendente).");
         if (String(cp.valido_ate) < hojeSaoPaulo()) {
           throw new ReservaError("Pacote vencido — o saldo não pode mais ser usado.");

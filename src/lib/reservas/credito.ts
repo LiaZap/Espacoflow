@@ -8,6 +8,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { clientesCreditos, politicaCancelamento } from "@/lib/db/schema/pacotes";
 import { pagamentos } from "@/lib/db/schema/pagamentos";
+import { idDoSaldo } from "./titular";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -56,7 +57,9 @@ function somaValida(rows: { valor: string; expira_em: Date | null }[]): number {
 }
 
 /** Saldo de crédito em R$ do cliente (fora de transação — leitura para a Hígia). */
-export async function saldoCreditoCliente(clienteId: string): Promise<number> {
+export async function saldoCreditoCliente(clienteIdOriginal: string): Promise<number> {
+  // Empresa com 2 contatos: o crédito é do TITULAR (compartilhado entre os contatos).
+  const clienteId = await idDoSaldo(clienteIdOriginal);
   const rows = await db
     .select({ valor: clientesCreditos.valor, expira_em: clientesCreditos.expira_em })
     .from(clientesCreditos)
@@ -65,7 +68,8 @@ export async function saldoCreditoCliente(clienteId: string): Promise<number> {
 }
 
 /** Saldo de crédito DENTRO da transação (usar com o advisory lock por cliente já tomado). */
-export async function saldoCreditoEmTx(tx: Tx, clienteId: string): Promise<number> {
+export async function saldoCreditoEmTx(tx: Tx, clienteIdOriginal: string): Promise<number> {
+  const clienteId = await idDoSaldo(clienteIdOriginal, tx); // titular, se houver
   const rows = await tx
     .select({ valor: clientesCreditos.valor, expira_em: clientesCreditos.expira_em })
     .from(clientesCreditos)
@@ -81,7 +85,7 @@ export async function debitarCreditoEmTx(
   const v = round2(params.valor);
   if (v <= 0) return;
   await tx.insert(clientesCreditos).values({
-    cliente_id: params.clienteId,
+    cliente_id: await idDoSaldo(params.clienteId, tx), // debita no titular (saldo compartilhado)
     reserva_id: params.reservaId,
     tipo: "debito_reserva",
     valor: String(-v),
@@ -147,7 +151,7 @@ export async function creditarCancelamentoReaisEmTx(
   const validadeDias = pol?.validade_credito_dias ?? 60;
   const expira = new Date(Date.now() + validadeDias * 24 * 3_600_000);
   await tx.insert(clientesCreditos).values({
-    cliente_id: params.clienteId,
+    cliente_id: await idDoSaldo(params.clienteId, tx), // crédito vai pro titular (compartilhado)
     reserva_id: params.reservaId,
     tipo: "credito_cancelamento",
     valor: String(credito),

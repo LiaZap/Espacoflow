@@ -40,7 +40,14 @@ function Campo({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-export function ClienteForm({ cliente }: { cliente?: Cliente }) {
+export function ClienteForm({
+  cliente,
+  titulares = [],
+}: {
+  cliente?: Cliente;
+  /** Clientes que podem ser TITULAR do saldo (empresa com mais de um contato autorizado). */
+  titulares?: Array<{ id: string; nome: string; telefone: string }>;
+}) {
   const [state, action] = useActionState<FormState, FormData>(salvarCliente, {});
 
   return (
@@ -88,6 +95,23 @@ export function ClienteForm({ cliente }: { cliente?: Cliente }) {
           />
         </Campo>
       </div>
+
+      <Campo label="Saldo compartilhado com (opcional)">
+        <select name="titular_id" className={selectClasses} defaultValue={cliente?.titular_id ?? ""}>
+          <option value="">Não compartilha (usa o próprio saldo)</option>
+          {titulares
+            .filter((t) => t.id !== cliente?.id)
+            .map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.nome} — {t.telefone}
+              </option>
+            ))}
+        </select>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Empresa com mais de um contato autorizado: escolha o cliente TITULAR. Este contato passa a consumir o pacote e
+          o crédito do titular (saldo único), e cada reserva fica registrada em quem reservou.
+        </p>
+      </Campo>
 
       <Campo label="Perfil de sala (opcional)">
         <Input

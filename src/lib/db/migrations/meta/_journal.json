@@ -134,6 +134,20 @@
       "when": 1786138948163,
       "tag": "0018_add_sala_preferida",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1786148711894,
+      "tag": "0019_add_titular_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1786149711532,
+      "tag": "0020_fk_titular",
+      "breakpoints": true
     }
   ]
 }

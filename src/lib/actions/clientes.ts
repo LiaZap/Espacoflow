@@ -73,6 +73,34 @@ export async function salvarCliente(_prev: FormState, formData: FormData): Promi
   if (!parsed.success) return { erro: primeiroErro(parsed.error.issues) };
   const dados = parsed.data;
 
+  // Saldo compartilhado: o vínculo é de UM nível só (contato → titular). Recusa apontar para si
+  // mesmo, para um cadastro inexistente/excluído ou para quem JÁ é contato de outro titular —
+  // uma cadeia partiria o saldo em dois em silêncio.
+  if (dados.titular_id) {
+    if (dados.titular_id === id) return { erro: "O cliente não pode ser titular do próprio saldo." };
+    const [t] = await db
+      .select({ id: clientes.id, nome: clientes.nome, titular: clientes.titular_id })
+      .from(clientes)
+      .where(and(eq(clientes.id, dados.titular_id), eq(clientes.is_deleted, false)));
+    if (!t) return { erro: "Titular do saldo não encontrado." };
+    if (t.titular) {
+      return { erro: `${t.nome} já usa o saldo de outro cliente. Escolha o titular principal do saldo.` };
+    }
+    // E este cliente não pode ser titular de alguém (senão viraria elo do meio da cadeia).
+    if (id) {
+      const [dependente] = await db
+        .select({ nome: clientes.nome })
+        .from(clientes)
+        .where(and(eq(clientes.titular_id, id), eq(clientes.is_deleted, false)))
+        .limit(1);
+      if (dependente) {
+        return {
+          erro: `Este cliente já é titular do saldo de ${dependente.nome}. Desvincule esse contato antes de apontar um titular.`,
+        };
+      }
+    }
+  }
+
   if (!id) {
     const [existe] = await db
       .select({ id: clientes.id })
@@ -117,6 +145,18 @@ export async function salvarCliente(_prev: FormState, formData: FormData): Promi
 /** Soft delete — nunca delete físico. */
 export async function excluirCliente(id: string): Promise<{ erro?: string }> {
   const sessao = await exigirPermissao("clientes", "excluir");
+  // Não deixa excluir quem é TITULAR de saldo compartilhado: os contatos vinculados perderiam
+  // o acesso ao pacote/crédito (que continuariam registrados neste cadastro).
+  const vinculados = await db
+    .select({ nome: clientes.nome })
+    .from(clientes)
+    .where(and(eq(clientes.titular_id, id), eq(clientes.is_deleted, false)))
+    .limit(3);
+  if (vinculados.length > 0) {
+    return {
+      erro: `Este cliente é titular do saldo de ${vinculados.map((v) => v.nome).join(", ")}. Desvincule esses contatos antes de excluir.`,
+    };
+  }
   const [r] = await db
     .update(clientes)
     .set({ is_deleted: true, deleted_at: new Date(), updated_at: new Date(), modified_by: sessao.userId })

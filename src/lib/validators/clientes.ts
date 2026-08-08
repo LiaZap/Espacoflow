@@ -19,6 +19,8 @@ export const clienteSchema = z.object({
   origem: z.string().trim().optional(),
   // Perfil de sala: quando preenchido, a Hígia prioriza essa sala se estiver livre.
   sala_preferida: z.string().trim().optional(),
+  // Empresa com 2+ contatos: id do cliente TITULAR do saldo ("" = usa o próprio saldo).
+  titular_id: z.preprocess((v) => (v === "" || v == null ? null : v), z.string().uuid().nullable().optional()),
 });
 
 export type ClienteInput = z.infer<typeof clienteSchema>;

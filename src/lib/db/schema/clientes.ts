@@ -1,4 +1,5 @@
 import {
+  type AnyPgColumn,
   pgTable,
   uuid,
   text,
@@ -43,6 +44,12 @@ export const clientes = pgTable(
     // PERFIL DE SALA do cliente (nome da sala, ex.: "Sala 02"). Quando preenchido, a Hígia
     // prioriza ESSA sala se estiver livre — respeita o perfil já conhecido em vez do padrão.
     sala_preferida: text("sala_preferida"),
+    // EMPRESA com mais de um contato autorizado: os contatos secundários apontam para o
+    // cliente TITULAR (a empresa). Saldo de pacote e crédito são SEMPRE do titular — assim os
+    // dois contatos consomem o MESMO saldo, e cada reserva fica no contato que a fez
+    // (rastreabilidade). Null = cliente comum (dono do próprio saldo).
+    // FK auto-referente com RESTRICT: não permite apagar um titular que está em uso.
+    titular_id: uuid("titular_id").references((): AnyPgColumn => clientes.id, { onDelete: "restrict" }),
 
     created_at: timestamp("created_at").notNull().defaultNow(),
     updated_at: timestamp("updated_at").notNull().defaultNow(),

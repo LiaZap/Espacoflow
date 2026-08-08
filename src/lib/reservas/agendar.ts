@@ -10,6 +10,7 @@ import { calcularJanela, ABRE_MIN, JORNADA_MIN } from "./disponibilidade";
 import { debitarPacoteEmTx, registrarDebitoEmTx, SaldoError } from "./pacote-saldo";
 import { saldoCreditoEmTx, debitarCreditoEmTx } from "./credito";
 import { ordenarSalasPorPreferencia, casaSalaNome } from "./sala-preferencia";
+import { idDoSaldo } from "./titular";
 
 // Reexporta as regras puras de sala (quem já importava de "./agendar" continua funcionando).
 export { ordenarSalasPorPreferencia, casaSalaNome };
@@ -228,9 +229,10 @@ export async function agendarReservaAgente(input: {
 
   try {
     const reserva = await db.transaction(async (tx) => {
-      // Serializa por cliente (mesmo padrão da ingestão): impede holds duplicados em
-      // corrida — retry da fila pós-agendamento, inline concorrente ou 2 tool_use no turno.
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${clienteId}))`);
+      // Serializa pelo DONO DO SALDO (o titular, quando a empresa tem 2 contatos): impede
+      // holds duplicados em corrida E o double-spend do crédito compartilhado — dois contatos
+      // agendando ao mesmo tempo travariam em chaves diferentes se fosse pelo clienteId.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${await idDoSaldo(clienteId, tx)}))`);
 
       // IDEMPOTÊNCIA: já existe reserva ATIVA do MESMO cliente para ESTA janela? Reaproveita.
       // (não filtra por status_pagamento: assim um retry de reserva paga por pacote
