@@ -1,0 +1,10 @@
+{
+  "key": "espaco-flow",
+  "label": "Espaco Flow",
+  "tokens": {
+    "marca": "#0F766E",
+    "marca-texto": "#115E59"
+  },
+  "logo": { "tipo": "svg" },
+  "avisos": []
+}
