@@ -37,8 +37,11 @@ export function janelaSanitizada(data: string, hora: string, duracaoMin: number)
   if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) {
     return "Data inválida (essa data não existe no calendário).";
   }
-  if (!Number.isInteger(duracaoMin) || duracaoMin < 60 || duracaoMin % 30 !== 0) {
-    return "Duração inválida (mínimo 60 min, em múltiplos de 30).";
+  // Regra operacional do Flow: a DURAÇÃO é em horas inteiras (1h, 2h, 3h...) — nada de 1h30.
+  // Os "30 em 30 min" valem para o HORÁRIO DE INÍCIO (checado abaixo), não para a duração.
+  // Isso também casa com a tabela de preços, que só tem horas inteiras.
+  if (!Number.isInteger(duracaoMin) || duracaoMin < 60 || duracaoMin % 60 !== 0) {
+    return "Duração inválida — as reservas são por hora cheia (1h, 2h, 3h...), com mínimo de 1 hora.";
   }
   const horaMin = Number(hora.slice(0, 2)) * 60 + Number(hora.slice(3, 5));
   // Grade operacional do Flow: início SEMPRE em hora cheia ou meia hora (nada de :15/:45).

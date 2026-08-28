@@ -14,7 +14,7 @@ export const FERRAMENTAS_AGENDA = [
             type: "object",
             properties: {
               data: { type: "string", description: "Data da sessão (AAAA-MM-DD)" },
-              horas: { type: "number", description: "Duração em horas (ex.: 1, 1.5, 2)" },
+              horas: { type: "number", description: "Duração em HORAS CHEIAS (1, 2, 3, 4...). Não existe meia hora de reserva." },
             },
             required: ["data", "horas"],
           },
@@ -58,7 +58,7 @@ export const FERRAMENTAS_AGENDA = [
         hora: { type: "string", description: "Hora de início no formato HH:MM (24h)" },
         duracao_min: {
           type: "integer",
-          description: "Duração em minutos (mínimo 60, em múltiplos de 30)",
+          description: "Duração em minutos, sempre em HORAS CHEIAS: 60, 120, 180... (mínimo 60). NÃO existe 1h30/90 min.",
         },
         precisa_mesa: {
           type: "boolean",
@@ -93,7 +93,7 @@ export const FERRAMENTAS_AGENDA = [
       properties: {
         data: { type: "string", description: "Data no formato AAAA-MM-DD" },
         hora: { type: "string", description: "Hora de início no formato HH:MM (24h)" },
-        duracao_min: { type: "integer", description: "Duração em minutos (mínimo 60, múltiplos de 30)" },
+        duracao_min: { type: "integer", description: "Duração em minutos, sempre em HORAS CHEIAS: 60, 120, 180... (mínimo 60). NÃO existe 1h30/90 min." },
         finalidade: {
           type: "string",
           description: "Para que o cliente vai usar a sala (ex.: atendimento, reunião, mentoria)",
@@ -180,7 +180,7 @@ export const FERRAMENTAS_AGENDA = [
         nova_duracao_min: {
           type: "integer",
           description:
-            "Nova duração em MINUTOS (mínimo 60, em múltiplos de 30; ex.: 2h = 120). Omita para manter a duração atual.",
+            "Nova duração em MINUTOS, em HORAS CHEIAS (60, 120, 180...; mínimo 60). Omita para manter a duração atual.",
         },
       },
       required: ["reserva_id"],

@@ -10,7 +10,7 @@ export const reservaSchema = z.object({
     .number()
     .int()
     .min(60, "Mínimo de 1 hora")
-    .refine((v) => v % 30 === 0, "Use intervalos de 30 minutos"),
+    .refine((v) => v % 60 === 0, "A reserva é por hora cheia (60, 120, 180...)"),
   tipo: z
     .enum(["tour", "uso_sala", "reuniao_comercial", "assinatura_contrato"])
     .default("uso_sala"),

@@ -176,11 +176,15 @@ export async function executarFerramentaAgenda(
         sala_recomendada_id: livres[0].id,
         tem_alternativa: livres.length > 1,
         instrucao:
-          "Ofereça SOMENTE a sala_recomendada, uma por vez (ex.: 'a " +
+          "Disponível na " +
           livres[0].nome +
-          " está disponível, quer?'). Quando o cliente aceitar, chame agendar_reserva passando sala_id = sala_recomendada_id (reserva a MESMA sala oferecida). NUNCA liste várias salas nem compare salas entre si. Se o cliente recusar, chame consultar_disponibilidade de novo com excluir=['" +
+          ". NÃO pergunte qual sala o cliente quer nem ofereça opções de sala — apresente a PROPOSTA da reserva e peça a aprovação: dia, horário de início e término, duração, a sala (" +
           livres[0].nome +
-          "'] para pegar a próxima compatível.",
+          ") e o VALOR (use calcular_preco). Ex.: 'Consegui para você: 24/08, das 18h às 19h, 1 hora, na " +
+          livres[0].nome +
+          ". Investimento: R$ X. Posso confirmar?'. Quando ele aprovar, chame agendar_reserva com sala_id = sala_recomendada_id (reserva a MESMA sala). NUNCA liste várias salas nem compare salas. Só se ele RECUSAR a sala, chame consultar_disponibilidade de novo com excluir=['" +
+          livres[0].nome +
+          "'].",
       });
     }
 

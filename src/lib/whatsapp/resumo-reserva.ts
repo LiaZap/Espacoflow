@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { reservas } from "@/lib/db/schema/reservas";
 import { salas } from "@/lib/db/schema/salas";
@@ -57,7 +57,7 @@ export async function enviarResumoReservas(params: {
     })
     .from(reservas)
     .innerJoin(salas, eq(reservas.sala_id, salas.id))
-    .where(inArray(reservas.id, params.reservaIds));
+    .where(and(inArray(reservas.id, params.reservaIds), eq(reservas.is_deleted, false)));
 
   const provider = getProvider();
   let enviados = 0;
