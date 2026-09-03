@@ -69,16 +69,21 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     return { enviada: false, motivo: "conversa já respondida (sem mensagem nova)" };
   }
 
-  // Comprovante de Pix: se o cliente mandou uma imagem e há reserva aguardando
+  // Comprovante de Pix: se o cliente mandou o comprovante e há reserva aguardando
   // pagamento, a Hígia LÊ e valida em código — confirma sozinha só se bater 100%
   // (Pix, valor exato, favorecido = conta do espaço, recente, não reutilizado);
   // qualquer divergência escala para a equipe. Não passa pelo LLM.
-  if (cfg.reserva_via_ia && ultima?.tipo === "image" && ultima.midia_url && cli?.telefone) {
+  // IMAGEM ou DOCUMENTO: banco como PicPay/Nubank gera o comprovante em PDF, que chega
+  // como "document" — antes só "image" entrava aqui, então o PDF caía no LLM, que pedia
+  // "print ou imagem" e a reserva NUNCA era confirmada. O processar valida o tipo real do
+  // arquivo baixado (só imagem/PDF confirmam).
+  if (cfg.reserva_via_ia && (ultima?.tipo === "image" || ultima?.tipo === "document") && ultima.midia_url && cli?.telefone) {
     const r = await processarComprovanteHigia({
       conversaId,
       clienteId: conv.cliente_id,
       telefone: cli.telefone,
       midiaUrl: ultima.midia_url,
+      tipoMidia: ultima.tipo,
     });
     if (r.tratou) return { enviada: true, motivo: r.confirmada ? "pagamento confirmado (IA)" : "comprovante escalado" };
   }
@@ -265,7 +270,7 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     // EXCEÇÃO: reserva paga por saldo de pacote/crédito É confirmada de verdade — não reescreve.
     violou = true;
     texto =
-      "Pra confirmar, me envia aqui o comprovante (print ou imagem) do Pix, tá? Assim que chegar eu confirmo na hora 🙏";
+      "Pra confirmar, me envia aqui o comprovante do Pix, tá? Pode ser print, imagem ou o PDF do banco. Assim que chegar eu confirmo na hora 🙏";
   }
 
   // A Hígia pode pedir fotos ([FOTO: id]) e o Pix ([PIX]). Separa os marcadores:

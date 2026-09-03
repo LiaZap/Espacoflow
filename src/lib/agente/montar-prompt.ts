@@ -104,7 +104,18 @@ export async function montarPromptHigia(opts?: {
   const topoRecorrente = recorrente
     ? "<cliente_recorrente>\nESTE CLIENTE É RECORRENTE e JÁ ESTÁ CADASTRADO (qualificado e com aceite registrado). NÃO faça perguntas de qualificação (tipo de uso, pessoas, maca), NÃO peça cadastro, NÃO peça aceite de política e NÃO envie link de formulário — em NENHUMA circunstância. Vá direto ao que ele pediu (reservar, cancelar, alterar, dúvida).\n</cliente_recorrente>\n\n"
     : "";
-  return topoRecorrente + prompt + agenda + pix + midia + memoria;
+  // SALDO no TOPO: cliente com pacote ativo ouviu "me manda o comprovante do Pix" e só usou o
+  // saldo depois de LEMBRAR a Hígia ("não tem mais banco de horas?"). O saldo estava no fim do
+  // prompt e com redação fraca ("se o cliente quiser"). Aqui vira ordem, antes de tudo.
+  const pacoteTopo = opts?.clienteId ? await pacoteAtivoDoCliente(opts.clienteId).catch(() => null) : null;
+  const topoSaldo = pacoteTopo
+    ? `<saldo_do_cliente>
+ESTE CLIENTE TEM ${pacoteTopo.horasSaldo}h DE SALDO no pacote (válido até ${pacoteTopo.validoAte}). É PROIBIDO pedir Pix ou enviar [PIX] para uma reserva enquanto houver saldo que cubra as horas pedidas: agende com usar_saldo=true, que já sai CONFIRMADA, e informe o saldo restante. Não pergunte se ele quer usar o saldo antes de oferecer — o saldo é a forma padrão de pagamento dele. Pix só entra se o saldo NÃO cobrir as horas, ou se ele estiver COMPRANDO um novo pacote.
+</saldo_do_cliente>
+
+`
+    : "";
+  return topoRecorrente + topoSaldo + prompt + agenda + pix + midia + memoria;
 }
 
 /** Instrui a Hígia a AGENDAR sozinha usando as ferramentas (tool use). */
@@ -195,7 +206,7 @@ async function blocoMemoria(clienteId: string): Promise<string> {
   const pacote = await pacoteAtivoDoCliente(clienteId).catch(() => null);
   if (pacote) {
     linhas.push(
-      `- Pacote ativo: ${pacote.horasSaldo}h de saldo (válido até ${pacote.validoAte}). Ofereça usar o saldo na reserva (agendar com usar_saldo=true, sem Pix) se o cliente quiser.`
+      `- Pacote ativo: ${pacote.horasSaldo}h de saldo (válido até ${pacote.validoAte}). Use o saldo na reserva (agendar com usar_saldo=true, SEM Pix) — é a forma de pagamento padrão dele. NÃO peça Pix tendo saldo que cubra as horas.`
     );
   }
   // Crédito em R$ (ex.: de um cancelamento) — TUDO-OU-NADA ao agendar.

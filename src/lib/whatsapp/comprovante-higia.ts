@@ -23,6 +23,16 @@ export interface ResultadoComprovante {
   confirmada?: boolean;
 }
 
+/**
+ * A mídia recebida serve como comprovante? IMAGEM sempre serviu. DOCUMENTO só vale se for
+ * PDF de verdade (PicPay/Nubank geram o comprovante em PDF) — um .docx/.xlsx/zip qualquer
+ * NÃO pode dar uma reserva como paga, já que a confirmação aqui é direta.
+ */
+export function midiaEhComprovante(tipoMidia: string | undefined, mediaType: string, url: string): boolean {
+  if (tipoMidia !== "document") return true;
+  return mediaType === "application/pdf" || /\.pdf(\?|$)/i.test(url);
+}
+
 function normalizar(s?: string | null): string {
   return (s ?? "")
     .normalize("NFD")
@@ -150,6 +160,8 @@ export async function processarComprovanteHigia(params: {
   clienteId: string;
   telefone: string;
   midiaUrl: string;
+  /** "image" | "document" — documento só confirma se o arquivo for PDF de verdade. */
+  tipoMidia?: string;
 }): Promise<ResultadoComprovante> {
   // TODOS os pagamentos pendentes vinculados a reservas (o lote aguardando Pix) —
   // um comprovante único costuma quitar várias sessões agendadas na mesma conversa.
@@ -222,8 +234,14 @@ export async function processarComprovanteHigia(params: {
       base64 = Buffer.from(await res.arrayBuffer()).toString("base64");
     }
   } catch {
-    // ignora falha de download — segue confirmando mesmo assim
+    // ignora falha de download — segue confirmando mesmo assim (política do espaço)
   }
+
+  // DOCUMENTO só vale como comprovante se for PDF (é o que PicPay/bancos geram). Um .docx,
+  // .xlsx ou zip qualquer NÃO pode confirmar reserva — nesse caso devolve o fluxo para a
+  // Hígia pedir o comprovante certo, em vez de dar a reserva como paga.
+  if (!midiaEhComprovante(params.tipoMidia, mediaType, params.midiaUrl)) return { tratou: false };
+
   const leitura = base64 ? await lerComprovante(base64, mediaType).catch(() => null) : null;
 
   // Marca informativa "confere?" (não bloqueia): valor (vs total do lote)/Pix/favorecido/data/anti-reuso.
