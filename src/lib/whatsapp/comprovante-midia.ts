@@ -15,6 +15,8 @@ export function midiaEhComprovante(tipoMidia: string | undefined, mediaType: str
 /** Mensagem mínima que este módulo precisa para achar o comprovante no histórico. */
 export interface MsgHistorico {
   id?: string;
+  /** payload cru do webhook — contem o arquivo em base64 ja descriptografado. */
+  payload_bruto?: unknown;
   origem: string;
   tipo: string;
   midia_url: string | null;
@@ -48,4 +50,19 @@ export async function comprovanteJaUsado(midiaUrl: string): Promise<boolean> {
     .where(and(eq(pagamentos.comprovante_url, midiaUrl), eq(pagamentos.is_deleted, false)))
     .limit(1);
   return Boolean(r);
+}
+
+/**
+ * Extrai o ARQUIVO (base64 ja descriptografado) do payload cru do webhook.
+ * O Evolution manda a midia em base64 no proprio evento; a URL do WhatsApp e ".enc"
+ * (criptografada) e nao serve para nada. Enquanto o MinIO nao guardar a copia, este e o
+ * unico jeito de ler o comprovante — e vale sempre, porque dispensa rede.
+ */
+export function extrairBase64DoPayload(payload: unknown): string | null {
+  const p = payload as Record<string, any> | null | undefined;
+  if (!p) return null;
+  const data = (p.data ?? p) as Record<string, any>;
+  const cand = data?.message?.base64 ?? data?.base64 ?? p?.message?.base64 ?? p?.base64;
+  if (typeof cand !== "string" || cand.length < 100) return null;
+  return cand.includes(",") ? cand.slice(cand.indexOf(",") + 1) : cand;
 }

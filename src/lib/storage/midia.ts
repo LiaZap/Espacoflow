@@ -45,7 +45,9 @@ export async function persistirMidiaBase64(
     const ext = EXT_POR_MIME[contentType] ?? EXT[tipo] ?? "bin";
     const chave = `midia/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
     return await uploadArquivo(chave, buffer, contentType);
-  } catch {
+  } catch (e) {
+    // NUNCA silenciar: um bucket vazio por meses foi o que escondeu a falha de comprovante.
+    console.error("[midia] falha ao guardar mídia (base64) no MinIO:", (e as Error)?.message);
     return null;
   }
 }
@@ -67,7 +69,8 @@ export async function persistirMidia(url: string, tipo: string, mimetype?: strin
     const ext = EXT_POR_MIME[contentType] ?? EXT[tipo] ?? "bin";
     const chave = `midia/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
     return await uploadArquivo(chave, buffer, contentType);
-  } catch {
+  } catch (e) {
+    console.error("[midia] falha ao guardar mídia (url) no MinIO:", (e as Error)?.message);
     return null;
   }
 }

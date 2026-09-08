@@ -17,7 +17,7 @@ import { getProvider } from "./provider";
 import { enviarHumanizado } from "./humanizar";
 import { enviarBoasVindas } from "./boas-vindas";
 import { resumoReservaTexto } from "./resumo-reserva";
-import { midiaEhComprovante, comprovanteJaUsado } from "./comprovante-midia";
+import { midiaEhComprovante, comprovanteJaUsado, extrairBase64DoPayload } from "./comprovante-midia";
 
 export interface ResultadoComprovante {
   tratou: boolean; // true = era comprovante e nós tratamos (não cai no LLM)
@@ -160,6 +160,8 @@ export async function processarComprovanteHigia(params: {
   tipoMidia?: string;
   /** quando o cliente mandou a mídia — só quita pagamento criado ANTES disso. */
   midiaEnviadaEm?: Date;
+  /** payload cru do webhook — traz o arquivo em base64 (dispensa baixar a mídia). */
+  payloadBruto?: unknown;
 }): Promise<ResultadoComprovante> {
   // ANTI-REUSO: a busca pega a mídia mais recente do cliente, então um comprovante JÁ usado
   // não pode confirmar uma reserva nova (nem ser reprocessado num retry do job).
@@ -235,7 +237,15 @@ export async function processarComprovanteHigia(params: {
   // risco); a leitura não bloqueia — só gera a marca "confere?" para a equipe revisar.
   let base64 = "";
   let mediaType = "";
+  // 1º) o ARQUIVO que veio no próprio webhook (base64 já descriptografado). É o caminho
+  // confiável: a URL do WhatsApp é ".enc" (criptografada) e a cópia no MinIO pode não existir.
+  const doPayload = extrairBase64DoPayload(params.payloadBruto);
+  if (doPayload) {
+    base64 = doPayload;
+    mediaType = tipoRealDoArquivo(Buffer.from(doPayload, "base64")) || "";
+  }
   try {
+    if (base64) throw new Error("já temos o arquivo do payload");
     // Timeout: sem isso um MinIO/CDN pendurado segura o job da fila no caminho da confirmação.
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 8000);

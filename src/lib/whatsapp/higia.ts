@@ -81,6 +81,7 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
       midiaUrl: midiaComprovante.midia_url,
       tipoMidia: midiaComprovante.tipo,
       midiaEnviadaEm: midiaComprovante.created_at,
+      payloadBruto: midiaComprovante.payload_bruto,
     });
     if (r.tratou) return { enviada: true, motivo: r.confirmada ? "pagamento confirmado (IA)" : "comprovante escalado" };
   }
