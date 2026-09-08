@@ -7,6 +7,7 @@ import { clientes } from "@/lib/db/schema/clientes";
 import { agenteConfig } from "@/lib/db/schema/agente";
 import { whatsappConversas, whatsappMensagens } from "@/lib/db/schema/whatsapp";
 import { lerComprovante, type LeituraComprovante } from "@/lib/documentos/ler-comprovante";
+import { tipoRealDoArquivo } from "@/lib/documentos/tipo-arquivo";
 import { sincronizarReserva } from "@/lib/google/calendar";
 import { registrarAuditoria } from "@/lib/audit/logger";
 import { hojeSaoPaulo } from "@/lib/reservas/disponibilidade";
@@ -16,6 +17,7 @@ import { getProvider } from "./provider";
 import { enviarHumanizado } from "./humanizar";
 import { enviarBoasVindas } from "./boas-vindas";
 import { resumoReservaTexto } from "./resumo-reserva";
+import { midiaEhComprovante, comprovanteJaUsado } from "./comprovante-midia";
 
 export interface ResultadoComprovante {
   tratou: boolean; // true = era comprovante e nós tratamos (não cai no LLM)
@@ -23,15 +25,9 @@ export interface ResultadoComprovante {
   confirmada?: boolean;
 }
 
-/**
- * A mídia recebida serve como comprovante? IMAGEM sempre serviu. DOCUMENTO só vale se for
- * PDF de verdade (PicPay/Nubank geram o comprovante em PDF) — um .docx/.xlsx/zip qualquer
- * NÃO pode dar uma reserva como paga, já que a confirmação aqui é direta.
- */
-export function midiaEhComprovante(tipoMidia: string | undefined, mediaType: string, url: string): boolean {
-  if (tipoMidia !== "document") return true;
-  return mediaType === "application/pdf" || /\.pdf(\?|$)/i.test(url);
-}
+// Regras puras/consultas sobre a MÍDIA do comprovante ficam em módulo próprio (arquivo < 500
+// linhas e separação regra x orquestração); reexportadas para não quebrar quem já importa daqui.
+export { midiaEhComprovante, acharComprovanteNovo, comprovanteJaUsado, type MsgHistorico } from "./comprovante-midia";
 
 function normalizar(s?: string | null): string {
   return (s ?? "")
@@ -162,10 +158,16 @@ export async function processarComprovanteHigia(params: {
   midiaUrl: string;
   /** "image" | "document" — documento só confirma se o arquivo for PDF de verdade. */
   tipoMidia?: string;
+  /** quando o cliente mandou a mídia — só quita pagamento criado ANTES disso. */
+  midiaEnviadaEm?: Date;
 }): Promise<ResultadoComprovante> {
+  // ANTI-REUSO: a busca pega a mídia mais recente do cliente, então um comprovante JÁ usado
+  // não pode confirmar uma reserva nova (nem ser reprocessado num retry do job).
+  if (await comprovanteJaUsado(params.midiaUrl)) return { tratou: false };
+
   // TODOS os pagamentos pendentes vinculados a reservas (o lote aguardando Pix) —
   // um comprovante único costuma quitar várias sessões agendadas na mesma conversa.
-  const pendentes = await db
+  const pendentesTodos = await db
     .select()
     .from(pagamentos)
     .where(
@@ -177,6 +179,12 @@ export async function processarComprovanteHigia(params: {
       )
     )
     .orderBy(desc(pagamentos.created_at));
+
+  // FRONTEIRA: o comprovante só quita pagamento que já existia quando ele foi enviado. Sem
+  // isso, uma mídia anterior à reserva poderia dar como paga uma reserva criada depois dela.
+  const pendentes = params.midiaEnviadaEm
+    ? pendentesTodos.filter((pg) => pg.created_at.getTime() <= params.midiaEnviadaEm!.getTime())
+    : pendentesTodos;
   if (pendentes.length === 0) {
     // SEM reserva pendente → este comprovante pode ser de uma COMPRA DE PACOTE. Só tratamos
     // pacote AQUI (não antes) para nunca ativar um pacote não pago com o print de uma reserva:
@@ -226,12 +234,20 @@ export async function processarComprovanteHigia(params: {
   // espaço, a confirmação é DIRETA após o envio do comprovante (o cliente assume o
   // risco); a leitura não bloqueia — só gera a marca "confere?" para a equipe revisar.
   let base64 = "";
-  let mediaType = "image/jpeg";
+  let mediaType = "";
   try {
-    const res = await fetch(params.midiaUrl);
+    // Timeout: sem isso um MinIO/CDN pendurado segura o job da fila no caminho da confirmação.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(params.midiaUrl, { signal: ctrl.signal });
+    clearTimeout(timer);
     if (res.ok) {
-      mediaType = res.headers.get("content-type")?.split(";")[0] || "image/jpeg";
-      base64 = Buffer.from(await res.arrayBuffer()).toString("base64");
+      const buf = Buffer.from(await res.arrayBuffer());
+      // Tipo pelo CONTEUDO (magic bytes). A midia e re-hospedada com extensao/MIME genericos
+      // ("document" -> .bin + application/octet-stream), entao nem o header nem a URL revelam
+      // que e um PDF; e um PNG chegava aqui rotulado image/jpeg, o que a API do modelo recusa.
+      mediaType = tipoRealDoArquivo(buf) || res.headers.get("content-type")?.split(";")[0] || "";
+      base64 = buf.toString("base64");
     }
   } catch {
     // ignora falha de download — segue confirmando mesmo assim (política do espaço)

@@ -12,7 +12,7 @@ import { extrairMarcadores, resolverMidia, urlMidiaAbsoluta, tipoWhatsapp } from
 import { extrairPix, montarMensagensPix } from "./pix";
 import { extrairTabela, montarTabelaPrecos } from "./tabela-precos";
 import { FERRAMENTAS_AGENDA, executarFerramentaAgenda } from "@/lib/agente/ferramentas";
-import { processarComprovanteHigia } from "./comprovante-higia";
+import { processarComprovanteHigia, acharComprovanteNovo } from "./comprovante-higia";
 import { enviarOnboardingPacoteCredito } from "./boas-vindas";
 import { enviarResumoReservas } from "./resumo-reserva";
 
@@ -33,19 +33,13 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
     .from(whatsappConversas)
     .where(and(eq(whatsappConversas.id, conversaId), eq(whatsappConversas.is_deleted, false)));
   if (!conv) return { enviada: false, motivo: "conversa não encontrada" };
-  if (conv.status !== "higia") return { enviada: false, motivo: "conversa sob atendimento humano" };
 
   const [cfg] = await db
     .select()
     .from(agenteConfig)
     .where(eq(agenteConfig.is_deleted, false))
     .limit(1);
-  if (!cfg?.ativo || !cfg?.resposta_automatica) {
-    return { enviada: false, motivo: "resposta automática desativada" };
-  }
-
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return { enviada: false, motivo: "sem ANTHROPIC_API_KEY (deixado para humano)" };
+  if (!cfg?.ativo) return { enviada: false, motivo: "agente desativado" };
 
   const [cli] = await db.select().from(clientes).where(eq(clientes.id, conv.cliente_id));
   // Só as ~30 mensagens mais recentes (custo/tokens): pega as últimas por created_at DESC e
@@ -60,15 +54,6 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
       .limit(30)
   ).reverse();
 
-  // Coalescing anti-"double-texting": se a última mensagem da conversa já NÃO é
-  // do cliente (a Hígia ou um humano já respondeu depois), não há nada novo a
-  // responder. Em rajada (oi / tudo bem / quero reservar), só o job que vê a
-  // última mensagem ainda sem resposta gera UMA resposta sobre todo o histórico.
-  const ultima = historico[historico.length - 1];
-  if (ultima && ultima.origem !== "user") {
-    return { enviada: false, motivo: "conversa já respondida (sem mensagem nova)" };
-  }
-
   // Comprovante de Pix: se o cliente mandou o comprovante e há reserva aguardando
   // pagamento, a Hígia LÊ e valida em código — confirma sozinha só se bater 100%
   // (Pix, valor exato, favorecido = conta do espaço, recente, não reutilizado);
@@ -77,15 +62,42 @@ export async function gerarRespostaHigia(conversaId: string): Promise<ResultadoH
   // como "document" — antes só "image" entrava aqui, então o PDF caía no LLM, que pedia
   // "print ou imagem" e a reserva NUNCA era confirmada. O processar valida o tipo real do
   // arquivo baixado (só imagem/PDF confirmam).
-  if (cfg.reserva_via_ia && (ultima?.tipo === "image" || ultima?.tipo === "document") && ultima.midia_url && cli?.telefone) {
+  // Procura a mídia em TODO o bloco novo do cliente: ele costuma mandar o comprovante e
+  // escrever "Esse é o comprovante" / "Obrigado" depois — aí a última mensagem é texto e o
+  // comprovante ficava sem ser processado (reserva presa em pendente).
+  const midiaComprovante = acharComprovanteNovo(historico);
+  if (cfg.reserva_via_ia && midiaComprovante?.midia_url && midiaComprovante.id && cli?.telefone) {
+    // Marca ANTES de avaliar: cada mídia é considerada UMA única vez. Sem isso, uma foto que o
+    // cliente mandou por outro motivo continuaria sendo "a mídia mais recente" e poderia
+    // confirmar uma reserva criada DEPOIS dela (reserva paga sem Pix).
+    await db
+      .update(whatsappMensagens)
+      .set({ processada_por_higia: true, updated_at: new Date() })
+      .where(eq(whatsappMensagens.id, midiaComprovante.id));
     const r = await processarComprovanteHigia({
       conversaId,
       clienteId: conv.cliente_id,
       telefone: cli.telefone,
-      midiaUrl: ultima.midia_url,
-      tipoMidia: ultima.tipo,
+      midiaUrl: midiaComprovante.midia_url,
+      tipoMidia: midiaComprovante.tipo,
+      midiaEnviadaEm: midiaComprovante.created_at,
     });
     if (r.tratou) return { enviada: true, motivo: r.confirmada ? "pagamento confirmado (IA)" : "comprovante escalado" };
+  }
+
+  // A partir daqui é CONVERSA (o LLM responde). Só agora valem os portões de atendimento
+  // humano, resposta automática e chave da API — a confirmação do comprovante acima é
+  // operação de CÓDIGO e NÃO pode depender deles.
+  if (conv.status !== "higia") return { enviada: false, motivo: "conversa sob atendimento humano" };
+  if (!cfg.resposta_automatica) return { enviada: false, motivo: "resposta automática desativada" };
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return { enviada: false, motivo: "sem ANTHROPIC_API_KEY (deixado para humano)" };
+
+  // Coalescing anti-"double-texting": se a última mensagem já NÃO é do cliente (a Hígia ou um
+  // humano respondeu depois), não há nada novo a responder.
+  const ultima = historico[historico.length - 1];
+  if (ultima && ultima.origem !== "user") {
+    return { enviada: false, motivo: "conversa já respondida (sem mensagem nova)" };
   }
 
   const mensagens = historico

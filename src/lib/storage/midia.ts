@@ -7,6 +7,15 @@ const EXT: Record<string, string> = {
   video: "mp4",
 };
 
+/** Extensao a partir do mimetype REAL (o tipo "document" sozinho viraria .bin). */
+const EXT_POR_MIME: Record<string, string> = {
+  "application/pdf": "pdf",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+};
+
 const MIME_POR_TIPO: Record<string, string> = {
   image: "image/jpeg",
   audio: "audio/ogg",
@@ -31,7 +40,9 @@ export async function persistirMidiaBase64(
     const buffer = Buffer.from(limpo, "base64");
     if (buffer.length === 0 || buffer.length > 16 * 1024 * 1024) return null;
     const contentType = mimetype || MIME_POR_TIPO[tipo] || "application/octet-stream";
-    const ext = EXT[tipo] ?? "bin";
+    // Extensao pelo mimetype REAL: comprovante em PDF era salvo como .bin/octet-stream e
+    // depois ninguem conseguia identificar que era um PDF.
+    const ext = EXT_POR_MIME[contentType] ?? EXT[tipo] ?? "bin";
     const chave = `midia/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
     return await uploadArquivo(chave, buffer, contentType);
   } catch {
@@ -40,7 +51,7 @@ export async function persistirMidiaBase64(
 }
 
 /** Baixa a mídia da URL do provedor e re-hospeda no MinIO (best-effort, com timeout). */
-export async function persistirMidia(url: string, tipo: string): Promise<string | null> {
+export async function persistirMidia(url: string, tipo: string, mimetype?: string): Promise<string | null> {
   if (!minioConfigurado()) return null;
   try {
     const ctrl = new AbortController();
@@ -52,8 +63,8 @@ export async function persistirMidia(url: string, tipo: string): Promise<string 
     const buffer = Buffer.from(await res.arrayBuffer());
     if (buffer.length === 0 || buffer.length > 16 * 1024 * 1024) return null;
 
-    const contentType = res.headers.get("content-type") || "application/octet-stream";
-    const ext = EXT[tipo] ?? "bin";
+    const contentType = mimetype || res.headers.get("content-type") || "application/octet-stream";
+    const ext = EXT_POR_MIME[contentType] ?? EXT[tipo] ?? "bin";
     const chave = `midia/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
     return await uploadArquivo(chave, buffer, contentType);
   } catch {

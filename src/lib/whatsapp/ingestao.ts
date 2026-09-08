@@ -17,6 +17,8 @@ export interface MensagemNormalizada {
   tipo: string;
   idExterno?: string;
   midiaUrl?: string;
+  /** mimetype informado pelo WhatsApp (ex.: application/pdf) — preserva o tipo real. */
+  midiaMime?: string;
   /** base64 já decodificado da mídia (Evolution com base64:true) — evita a URL .enc. */
   midiaBase64?: string;
   payload: unknown;
@@ -44,6 +46,7 @@ export function normalizarEvolution(payload: PayloadQualquer): MensagemNormaliza
   let texto: string | undefined;
   let tipo = "text";
   let midiaUrl: string | undefined;
+  let midiaMime: string | undefined;
 
   if (typeof msg.conversation === "string") texto = msg.conversation;
   else if (msg.extendedTextMessage?.text) texto = String(msg.extendedTextMessage.text);
@@ -51,6 +54,7 @@ export function normalizarEvolution(payload: PayloadQualquer): MensagemNormaliza
     tipo = "image";
     texto = msg.imageMessage.caption ? String(msg.imageMessage.caption) : undefined;
     midiaUrl = msg.imageMessage.url ?? msg.imageMessage.mediaUrl;
+    midiaMime = msg.imageMessage.mimetype ? String(msg.imageMessage.mimetype) : undefined;
   } else if (msg.audioMessage) {
     tipo = "audio";
     midiaUrl = msg.audioMessage.url ?? msg.audioMessage.mediaUrl;
@@ -58,6 +62,7 @@ export function normalizarEvolution(payload: PayloadQualquer): MensagemNormaliza
     tipo = "document";
     texto = msg.documentMessage.fileName ? String(msg.documentMessage.fileName) : undefined;
     midiaUrl = msg.documentMessage.url ?? msg.documentMessage.mediaUrl;
+    midiaMime = msg.documentMessage.mimetype ? String(msg.documentMessage.mimetype) : undefined;
   } else if (msg.videoMessage) {
     tipo = "video";
     texto = msg.videoMessage.caption ? String(msg.videoMessage.caption) : undefined;
@@ -68,7 +73,7 @@ export function normalizarEvolution(payload: PayloadQualquer): MensagemNormaliza
   const b64 = (msg?.base64 ?? data?.base64) as unknown;
   const midiaBase64 = typeof b64 === "string" && b64.length > 0 ? b64 : undefined;
 
-  return { telefone, nome, texto, tipo, midiaUrl, midiaBase64, idExterno: key.id, payload, fromMe };
+  return { telefone, nome, texto, tipo, midiaUrl, midiaMime, midiaBase64, idExterno: key.id, payload, fromMe };
 }
 
 export type ResultadoIngestao =
@@ -94,10 +99,10 @@ export async function ingerirMensagemRecebida(m: MensagemNormalizada): Promise<R
   // base64, tenta baixar a URL; se nada der (MinIO off), mantém a URL original.
   let midiaFinal = m.midiaUrl ?? null;
   if (m.midiaBase64) {
-    const persistida = await persistirMidiaBase64(m.midiaBase64, m.tipo);
+    const persistida = await persistirMidiaBase64(m.midiaBase64, m.tipo, m.midiaMime);
     if (persistida) midiaFinal = persistida;
   } else if (m.midiaUrl) {
-    const persistida = await persistirMidia(m.midiaUrl, m.tipo);
+    const persistida = await persistirMidia(m.midiaUrl, m.tipo, m.midiaMime);
     if (persistida) midiaFinal = persistida;
   }
 
