@@ -1,8 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { acharComprovanteNovo, midiaEhComprovante, type MsgHistorico } from "./comprovante-higia";
 
-const u = (tipo: string, midia_url: string | null = null, processada_por_higia = false): MsgHistorico =>
-  ({ id: "m" + Math.random(), origem: "user", tipo, midia_url, processada_por_higia });
+const u = (tipo: string, midia_url: string | null = null, processada_por_higia = false, minAtras = 0): MsgHistorico =>
+  ({
+    id: "m" + Math.random(),
+    origem: "user",
+    tipo,
+    midia_url,
+    processada_por_higia,
+    created_at: new Date(Date.now() - minAtras * 60_000),
+  });
 const h = (): MsgHistorico => ({ origem: "higia", tipo: "text", midia_url: null });
 
 describe("acharComprovanteNovo — achar o comprovante no bloco novo do cliente", () => {
@@ -43,6 +50,18 @@ describe("acharComprovanteNovo — achar o comprovante no bloco novo do cliente"
   it("entre uma mídia já avaliada e uma nova, pega a NOVA", () => {
     const hist = [u("image", "https://x/velha.jpg", true), u("document", "https://x/nova.bin", false)];
     expect(acharComprovanteNovo(hist)?.midia_url).toBe("https://x/nova.bin");
+  });
+
+  it("NÃO trata mídia ANTIGA (regressão 10/09: 'Recebi seu comprovante' sem o cliente mandar nada)", () => {
+    // O cliente pede uma reserva por TEXTO; no histórico existe uma foto de horas atrás.
+    // Sem a janela de tempo, aquela foto virava "comprovante" a cada nova mensagem.
+    const hist = [u("image", "https://x/foto-de-ontem.jpg", false, 240), u("text")];
+    expect(acharComprovanteNovo(hist)).toBeUndefined();
+  });
+
+  it("trata a mídia RECENTE (o comprovante que acabou de chegar)", () => {
+    const hist = [u("document", "https://x/agora.bin", false, 2), u("text")];
+    expect(acharComprovanteNovo(hist)?.midia_url).toBe("https://x/agora.bin");
   });
 
   it("sem mídia no bloco novo, não há comprovante", () => {

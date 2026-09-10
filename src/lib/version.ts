@@ -1,2 +1,2 @@
 /** Versão do build — usada no /api/health (web) e no log de inicialização do worker. */
-export const APP_VERSION = process.env.APP_VERSION || "higia-comprovante-provado-2026-09-08";
+export const APP_VERSION = process.env.APP_VERSION || "higia-comprovante-janela-2026-09-10";

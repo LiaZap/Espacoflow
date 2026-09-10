@@ -158,7 +158,44 @@ async function main() {
   assert("RESERVA marcada como CONFIRMADA", depois.status_reserva === "confirmada", depois.status_reserva);
   assert("comprovante registrado no pagamento", pgDepois.comprovante_url === url);
 
-  // 6) Anti-reuso: rodar de novo NÃO pode confirmar nada novo nem repetir
+  // 6) REGRESSÃO 10/09: mídia ANTIGA no histórico + mensagem de texto nova NÃO pode disparar
+  //    "Recebi seu comprovante". Cria outra reserva pendente e um texto novo do cliente.
+  const [res2] = await db
+    .insert(reservas)
+    .values({
+      cliente_id: cli.id,
+      sala_id: sala.id,
+      data: inicio.toISOString().slice(0, 10),
+      hora: "15:00:00",
+      duracao_min: 60,
+      inicio_em: new Date(inicio.getTime() + 5 * 3_600_000),
+      fim_em: new Date(inicio.getTime() + 6 * 3_600_000),
+      status_reserva: "pendente",
+      status_pagamento: "pendente",
+    })
+    .returning();
+  const [pg2] = await db
+    .insert(pagamentos)
+    .values({ cliente_id: cli.id, reserva_id: res2.id, valor: "40.00", status: "pendente", provedor: "pix_manual" })
+    .returning();
+  await db.update(whatsappConversas).set({ status: "higia" }).where(eq(whatsappConversas.id, conv.id));
+  await db.insert(whatsappMensagens).values({
+    conversa_id: conv.id,
+    origem: "user",
+    tipo: "text",
+    conteudo: "Boa tarde, gostaria de reservar a sala 03 hoje das 19h as 22h.",
+    created_at: new Date(),
+    enviada_em: new Date(),
+  });
+  const r3 = await gerarRespostaHigia(conv.id);
+  const [pg2Depois] = await db.select().from(pagamentos).where(eq(pagamentos.id, pg2.id));
+  assert(
+    "texto novo + mídia antiga NÃO vira comprovante",
+    r3.motivo !== "comprovante escalado" && pg2Depois.status === "pendente",
+    `${r3.motivo ?? "-"} / pagamento ${pg2Depois.status}`
+  );
+
+  // 7) Anti-reuso: rodar de novo NÃO pode confirmar nada novo nem repetir
   const r2 = await gerarRespostaHigia(conv.id);
   assert("não reprocessa o mesmo comprovante", r2.motivo !== "pagamento confirmado (IA)", r2.motivo ?? "-");
 

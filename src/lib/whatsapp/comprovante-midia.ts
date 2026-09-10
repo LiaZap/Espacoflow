@@ -25,19 +25,27 @@ export interface MsgHistorico {
   created_at?: Date;
 }
 
+/** Só vale como comprovante a mídia enviada nos últimos X minutos. */
+export const JANELA_COMPROVANTE_MIN = 30;
+
 /**
- * Acha a MÍDIA do cliente que ainda NÃO foi avaliada pelo fluxo de comprovante.
- * Não olha só a última mensagem, porque dois casos reais quebravam isso:
- *  - o cliente manda o comprovante e escreve "Esse é o comprovante" / "Obrigado" depois;
- *  - alguém da equipe responde manualmente depois do comprovante.
- * Cada mídia é avaliada UMA vez (marcada como processada em seguida): assim uma foto antiga
- * que o cliente mandou por outro motivo nunca volta para confirmar uma reserva futura.
+ * Acha a MÍDIA que o cliente ACABOU de mandar (últimos JANELA_COMPROVANTE_MIN minutos) e que
+ * ainda não foi avaliada. Não olha só a última mensagem, porque o cliente costuma escrever
+ * "Esse é o comprovante"/"Obrigado" depois, e a equipe às vezes responde antes de nós.
+ *
+ * A JANELA é essencial: sem ela, uma mídia antiga do histórico voltava a ser tratada como
+ * comprovante a cada nova mensagem de texto — e o cliente ouvia "Recebi seu comprovante" sem
+ * ter mandado nada.
  */
-export function acharComprovanteNovo(historico: MsgHistorico[]): MsgHistorico | undefined {
+export function acharComprovanteNovo(historico: MsgHistorico[], agora = new Date()): MsgHistorico | undefined {
+  const limite = agora.getTime() - JANELA_COMPROVANTE_MIN * 60_000;
   for (let i = historico.length - 1; i >= 0; i--) {
     const m = historico[i];
     if (m.origem !== "user" || m.processada_por_higia) continue;
-    if ((m.tipo === "image" || m.tipo === "document") && m.midia_url) return m;
+    if (m.tipo !== "image" && m.tipo !== "document") continue;
+    if (!m.midia_url) continue;
+    if (m.created_at && m.created_at.getTime() < limite) return undefined; // mídia velha: para aqui
+    return m;
   }
   return undefined;
 }
